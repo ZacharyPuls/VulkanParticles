@@ -9,7 +9,7 @@
 
 class VertexBuffer {
 public:
-	VertexBuffer(const VkDevice& logicalDevice, const PhysicalDevice*& physicalDevice, const std::vector<Vertex>& vertices) : logicalDevice(logicalDevice), physicalDevice(physicalDevice), vertices(vertices) {
+	VertexBuffer(const VkDevice& logicalDevice, PhysicalDevice*& physicalDevice, const std::vector<Vertex>& vertices) : logicalDevice(logicalDevice), physicalDevice(physicalDevice), vertices(vertices) {
 		VkBufferCreateInfo bufferCreateInfo = {
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(vertices[0]) * vertices.size(),
@@ -57,16 +57,27 @@ public:
 		void* data;
 		vkMapMemory(logicalDevice, bufferMemory, 0, bufferCreateInfo.size, 0, &data);
 		memcpy(data, vertices.data(), static_cast<size_t>(bufferCreateInfo.size));
+		vkUnmapMemory(logicalDevice, bufferMemory);
 	}
 
 	~VertexBuffer() {
-		vkDestroyBuffer(logicalDevice, bufferHandle, nullptr);
 		vkFreeMemory(logicalDevice, bufferMemory, nullptr);
+		vkDestroyBuffer(logicalDevice, bufferHandle, nullptr);
+	}
+
+	const VkBuffer& GetHandle() const
+	{
+		return bufferHandle;
+	}
+
+	const uint32_t GetNumVertices() const
+	{
+		return vertices.size();
 	}
 private:
 	VkBuffer bufferHandle;
 	VkDeviceMemory bufferMemory;
 	const VkDevice& logicalDevice;
-	const PhysicalDevice*& physicalDevice;
+	PhysicalDevice*& physicalDevice;
 	const std::vector<Vertex>& vertices;
 };

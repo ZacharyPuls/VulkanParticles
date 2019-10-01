@@ -10,6 +10,7 @@
 #include "PhysicalDevice.h"
 #include "ImageView.h"
 #include "SwapChain.h"
+#include "VertexBuffer.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -59,6 +60,7 @@ public:
 			vkDestroyFence(device, inFlightFences[i], nullptr);
 		}
 		delete commandPool;
+		delete triangleVertexBuffer;
 		vkDestroyDevice(device, nullptr);
 		vkDestroySurfaceKHR(instance, surface, nullptr);
 		vkDestroyInstance(instance, nullptr);
@@ -86,6 +88,7 @@ private:
 	std::vector<VkSemaphore> imageAvailableSemaphores;
 	std::vector<VkSemaphore> renderFinishedSemaphores;
 	std::vector<VkFence> inFlightFences;
+	VertexBuffer* triangleVertexBuffer;
 	size_t currentFrame = 0;
 	GLFWwindow* appWindow;
 
@@ -340,7 +343,9 @@ private:
 	}
 
 	void createVulkanCommandBuffers() {
-		commandPool->SubmitRenderPass(renderPass, swapChainFramebuffers, swapChain->GetExtent(), graphicsPipeline);
+		const std::vector<Vertex> triangleVertices = { {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}, {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}}, {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}} };
+		triangleVertexBuffer = new VertexBuffer(device, physicalDevice, triangleVertices);
+		commandPool->SubmitRenderPass(renderPass, swapChainFramebuffers, swapChain->GetExtent(), graphicsPipeline, triangleVertexBuffer);
 	}
 
 	void createVulkanSyncObjects() {

@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include <string>
+#include "VertexBuffer.h"
 
 class CommandPool
 {
@@ -35,7 +36,7 @@ public:
 		return commandPoolHandle;
 	}
 
-	void SubmitRenderPass(RenderPass*& renderPass, const std::vector<Framebuffer*>& framebuffers, const VkExtent2D& renderAreaExtent, GraphicsPipeline*& graphicsPipeline)
+	void SubmitRenderPass(RenderPass*& renderPass, const std::vector<Framebuffer*>& framebuffers, const VkExtent2D& renderAreaExtent, GraphicsPipeline*& graphicsPipeline, VertexBuffer*& vertexBuffer)
 	{
 		commandBufferHandles.resize(framebuffers.size());
 		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
@@ -71,7 +72,10 @@ public:
 			renderPassBeginInfo.pClearValues = &clearColor;
 			vkCmdBeginRenderPass(commandBufferHandles[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(commandBufferHandles[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->GetHandle());
-			vkCmdDraw(commandBufferHandles[i], 3, 1, 0, 0);
+			VkBuffer vertexBuffers[] = { vertexBuffer->GetHandle() };
+			VkDeviceSize offsets[] = { 0 };
+			vkCmdBindVertexBuffers(commandBufferHandles[i], 0, 1, vertexBuffers, offsets);
+			vkCmdDraw(commandBufferHandles[i], vertexBuffer->GetNumVertices(), 1, 0, 0);
 			vkCmdEndRenderPass(commandBufferHandles[i]);
 
 			if (vkEndCommandBuffer(commandBufferHandles[i]) != VK_SUCCESS) {
