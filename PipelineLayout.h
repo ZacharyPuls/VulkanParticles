@@ -7,12 +7,12 @@
 class PipelineLayout
 {
 public:
-	PipelineLayout(const VkDevice& logicalDevice) : logicalDevice(logicalDevice)
+	PipelineLayout(const VkDevice& logicalDevice, const VkDescriptorSetLayout& descriptorSetLayout) : logicalDevice(logicalDevice)
 	{
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = 0,
-			.pSetLayouts = nullptr,
+			.setLayoutCount = 1,
+			.pSetLayouts = &descriptorSetLayout,
 			.pushConstantRangeCount = 0,
 			.pPushConstantRanges = nullptr
 		};

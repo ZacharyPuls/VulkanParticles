@@ -4,11 +4,11 @@
 #include "RenderPass.h"
 #include "Framebuffer.h"
 #include "GraphicsPipeline.h"
+#include "Buffer.h"
 
 #include <stdexcept>
 #include <vector>
 #include <string>
-#include "VertexBuffer.h"
 
 class CommandPool
 {
@@ -36,7 +36,7 @@ public:
 		return commandPoolHandle;
 	}
 
-	void SubmitRenderPass(RenderPass*& renderPass, const std::vector<Framebuffer*>& framebuffers, const VkExtent2D& renderAreaExtent, GraphicsPipeline*& graphicsPipeline, VertexBuffer*& vertexBuffer)
+	void SubmitRenderPass(RenderPass*& renderPass, const std::vector<Framebuffer*>& framebuffers, const VkExtent2D& renderAreaExtent, GraphicsPipeline*& graphicsPipeline, Buffer* vertexBuffer, Buffer* indexBuffer, const uint32_t numIndices)
 	{
 		commandBufferHandles.resize(framebuffers.size());
 		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
@@ -61,27 +61,73 @@ public:
 				throw std::runtime_error("Failed to begin recording Vulkan command buffer with index [" + std::to_string(i) + "].");
 			}
 
-			VkRenderPassBeginInfo renderPassBeginInfo = {};
-			renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-			renderPassBeginInfo.renderPass = renderPass->GetHandle();
-			renderPassBeginInfo.framebuffer = framebuffers[i]->GetHandle();
-			renderPassBeginInfo.renderArea.offset = { 0, 0 };
-			renderPassBeginInfo.renderArea.extent = renderAreaExtent;
 			VkClearValue clearColor = { 0.0f, 0.0f, 0.0f, 1.0f };
-			renderPassBeginInfo.clearValueCount = 1;
-			renderPassBeginInfo.pClearValues = &clearColor;
+			
+			VkRenderPassBeginInfo renderPassBeginInfo = {
+				.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+				.renderPass = renderPass->GetHandle(),
+				.framebuffer = framebuffers[i]->GetHandle(),
+				.renderArea =
+				{
+					.offset = { 0, 0 },
+					.extent = renderAreaExtent
+				},
+				.clearValueCount = 1,
+				.pClearValues = &clearColor
+			};
+
 			vkCmdBeginRenderPass(commandBufferHandles[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(commandBufferHandles[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->GetHandle());
 			VkBuffer vertexBuffers[] = { vertexBuffer->GetHandle() };
 			VkDeviceSize offsets[] = { 0 };
 			vkCmdBindVertexBuffers(commandBufferHandles[i], 0, 1, vertexBuffers, offsets);
-			vkCmdDraw(commandBufferHandles[i], vertexBuffer->GetNumVertices(), 1, 0, 0);
+			vkCmdBindIndexBuffer(commandBufferHandles[i], indexBuffer->GetHandle(), 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(commandBufferHandles[i], numIndices, 1, 0, 0, 0);
 			vkCmdEndRenderPass(commandBufferHandles[i]);
 
 			if (vkEndCommandBuffer(commandBufferHandles[i]) != VK_SUCCESS) {
 				throw std::runtime_error("Failed to record Vulkan command buffer with index [" + std::to_string(i) + "].");
 			}
 		}
+	}
+
+	void ExecuteBufferCopy(const Buffer* sourceBuffer, const Buffer* destinationBuffer, const VkDeviceSize& size, const VkQueue& graphicsQueue)
+	{
+		VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.commandPool = commandPoolHandle,
+			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			.commandBufferCount = 1
+		};
+
+		VkCommandBuffer commandBufferHandle;
+		vkAllocateCommandBuffers(logicalDevice, &commandBufferAllocateInfo, &commandBufferHandle);
+
+		VkCommandBufferBeginInfo commandBufferBeginInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+		};
+		
+		vkBeginCommandBuffer(commandBufferHandle, &commandBufferBeginInfo);
+
+		VkBufferCopy bufferCopy = {
+			.size = size
+		};
+
+		vkCmdCopyBuffer(commandBufferHandle, sourceBuffer->GetHandle(), destinationBuffer->GetHandle(), 1, &bufferCopy);
+		vkEndCommandBuffer(commandBufferHandle);
+
+		VkSubmitInfo submitInfo = {
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			.commandBufferCount = 1,
+			.pCommandBuffers = &commandBufferHandle
+		};
+
+		// TODO: if we need to do more transfer operations in parallel, instead of vkQueueWaitIdle, create and wait for a fence for each transfer op
+		vkQueueSubmit(graphicsQueue, 1, &submitInfo, nullptr);
+		vkQueueWaitIdle(graphicsQueue);
+
+		vkFreeCommandBuffers(logicalDevice, commandPoolHandle, 1, &commandBufferHandle);
 	}
 
 	const VkCommandBuffer* GetBuffer(const uint32_t index) const

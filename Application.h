@@ -10,7 +10,10 @@
 #include "PhysicalDevice.h"
 #include "ImageView.h"
 #include "SwapChain.h"
-#include "VertexBuffer.h"
+#include "Buffer.h"
+#include "Instance.h"
+#include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -43,6 +46,13 @@ static void DebugMessage(const std::string& message) {/*
 */}
 #endif
 
+struct UBO
+{
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+};
+
 class Application
 {
 public:
@@ -54,16 +64,22 @@ public:
 
 	~Application() {
 		destroyVulkanSwapChain();
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
 			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
 			vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
 			vkDestroyFence(device, inFlightFences[i], nullptr);
 		}
 		delete commandPool;
-		delete triangleVertexBuffer;
+		delete rectangleVertexBuffer;
+		delete rectangleIndexBuffer;
+		for (auto buffer : uniformBuffers)
+		{
+			delete buffer;
+		}
 		vkDestroyDevice(device, nullptr);
-		vkDestroySurfaceKHR(instance, surface, nullptr);
-		vkDestroyInstance(instance, nullptr);
+		vkDestroySurfaceKHR(instance->GetHandle(), surface, nullptr);
+		delete instance;
 		glfwDestroyWindow(appWindow);
 		glfwTerminate();
 	}
@@ -73,7 +89,7 @@ public:
 	}
 
 private:
-	VkInstance instance;
+	Instance* instance;
 	VkSurfaceKHR surface;
 	PhysicalDevice *physicalDevice;
 	VkDevice device;
@@ -82,13 +98,16 @@ private:
 	SwapChain* swapChain;
 	std::vector<ImageView*> swapChainImageViews;
 	RenderPass* renderPass;
+	VkDescriptorSetLayout descriptorSetLayout;
 	GraphicsPipeline* graphicsPipeline;
 	std::vector<Framebuffer*> swapChainFramebuffers;
 	CommandPool* commandPool;
 	std::vector<VkSemaphore> imageAvailableSemaphores;
 	std::vector<VkSemaphore> renderFinishedSemaphores;
 	std::vector<VkFence> inFlightFences;
-	VertexBuffer* triangleVertexBuffer;
+	Buffer* rectangleVertexBuffer;
+	Buffer* rectangleIndexBuffer;
+	std::vector<Buffer*> uniformBuffers;
 	size_t currentFrame = 0;
 	GLFWwindow* appWindow;
 
@@ -143,49 +162,29 @@ private:
 		createVulkanSwapChain();
 		createVulkanImageViews();
 		renderPass = new RenderPass(device, swapChain->GetImageFormat());
+		createVulkanDescriptorSetLayout();
 		createVulkanGraphicsPipeline();
 		createVulkanFramebuffers();
 		createVulkanCommandPool();
 		createVulkanCommandBuffers();
+		createVulkanUniformBuffers();
 		createVulkanSyncObjects();
 	}
 
 	void createVulkanInstance() {
 		uint32_t glfwExtensionCount = 0;
 		const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-		VkApplicationInfo applicationInfo = {};
-		applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-		applicationInfo.pApplicationName = "Vulkan Particles!";
-		applicationInfo.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
-		applicationInfo.pEngineName = "No Engine";
-		applicationInfo.engineVersion = VK_MAKE_VERSION(0, 0, 0);
-		applicationInfo.apiVersion = VK_API_VERSION_1_1;
-		VkInstanceCreateInfo instanceCreateInfo = {};
-		instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-		instanceCreateInfo.pApplicationInfo = &applicationInfo;
-		instanceCreateInfo.enabledExtensionCount = glfwExtensionCount;
-		instanceCreateInfo.ppEnabledExtensionNames = glfwExtensions;
-		instanceCreateInfo.enabledLayerCount = 0;
-
-		if (ENABLE_VK_VALIDATION_LAYERS && isVkValidationLayerSupported()) {
-			instanceCreateInfo.enabledLayerCount = static_cast<uint32_t>(VK_VALIDATION_LAYERS.size());
-			instanceCreateInfo.ppEnabledLayerNames = &VK_VALIDATION_LAYERS[0];
-		}
-
-		if (vkCreateInstance(&instanceCreateInfo, nullptr, &instance) != VK_SUCCESS) {
-			throw std::runtime_error("Could not create Vulkan instance.");
-		}
+		instance = new Instance("Vulkan Particles!", VK_MAKE_VERSION(0, 0, 1), "No Engine", VK_MAKE_VERSION(0, 0, 0), glfwExtensionCount, glfwExtensions, ENABLE_VK_VALIDATION_LAYERS, VK_VALIDATION_LAYERS);
 	}
 
 	void createVulkanSurface() {
-		if (glfwCreateWindowSurface(instance, appWindow, nullptr, &surface) != VK_SUCCESS) {
+		if (glfwCreateWindowSurface(instance->GetHandle(), appWindow, nullptr, &surface) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create surface for GLFW window and previously created Vulkan instance.");
 		}
 	}
 	
 	void selectVulkanDevice() {
-		const auto availableDevices = PhysicalDevice::Enumerate(instance, surface);
+		const auto availableDevices = PhysicalDevice::Enumerate(instance->GetHandle(), surface);
 
 		for (auto availableDevice : availableDevices) {
 			if (isVulkanDeviceSuitable(availableDevice, surface)) {
@@ -206,7 +205,7 @@ private:
 			const auto swapChainSupport = SwapChain::SupportDetails::Query(physicalDevice->GetHandle(), surface);
 			swapChainSuitable = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
 		}
-		return physicalDevice->GetQueueFamilyIndices(surface).IsComplete() && requiredExtensionsSupported && swapChainSuitable;
+		return physicalDevice->EnumerateQueueFamilies(surface).IsComplete() && requiredExtensionsSupported && swapChainSuitable;
 	}
 
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
@@ -244,7 +243,7 @@ private:
 	}
 
 	void createVulkanLogicalDevice() {
-		auto queueFamilyIndices = physicalDevice->GetQueueFamilyIndices(surface);
+		auto queueFamilyIndices = physicalDevice->EnumerateQueueFamilies(surface);
 
 		float queuePriorities[] = { 1.0f };
 
@@ -303,13 +302,35 @@ private:
 		}
 	}
 
+	void createVulkanDescriptorSetLayout()
+	{
+		VkDescriptorSetLayoutBinding descriptorSetLayoutBinding = {
+			.binding = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+			.pImmutableSamplers = nullptr
+		};
+
+		VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = 1,
+			.pBindings = &descriptorSetLayoutBinding
+		};
+
+		if (vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create Vulkan descriptor set layout.");
+		}
+	}
+	
 	static std::stringstream readFile(const std::string& filename) {
 		std::ifstream file(filename, std::ios::binary);
 
 		if (!file.is_open()) {
 			throw std::runtime_error("Failed to open file with filename [" + filename + "].");
 		}
-		
+		 
 		std::stringstream buffer;
 		buffer << file.rdbuf();
 	
@@ -322,7 +343,7 @@ private:
 	{
 		const auto vertexShaderSource = readFile("assets/shaders/vert.spv");
 		const auto fragmentShaderSource = readFile("assets/shaders/frag.spv");
-		graphicsPipeline = new GraphicsPipeline(device, vertexShaderSource, fragmentShaderSource, "main", swapChain->GetExtent(), renderPass);
+		graphicsPipeline = new GraphicsPipeline(device, vertexShaderSource, fragmentShaderSource, "main", swapChain->GetExtent(), renderPass, descriptorSetLayout);
 	}
 
 	void createVulkanFramebuffers() {
@@ -338,14 +359,44 @@ private:
 	}
 
 	void createVulkanCommandPool() {
-		const auto queueFamilyIndices = physicalDevice->GetQueueFamilyIndices(surface);
+		const auto queueFamilyIndices = physicalDevice->EnumerateQueueFamilies(surface);
 		commandPool = new CommandPool(device, queueFamilyIndices.GraphicsFamily.value());
 	}
 
 	void createVulkanCommandBuffers() {
-		const std::vector<Vertex> triangleVertices = { {{0.0f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}, {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}}, {{-0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}} };
-		triangleVertexBuffer = new VertexBuffer(device, physicalDevice, triangleVertices);
-		commandPool->SubmitRenderPass(renderPass, swapChainFramebuffers, swapChain->GetExtent(), graphicsPipeline, triangleVertexBuffer);
+		const std::vector<Vertex> rectangleVertices = {
+			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}, {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}}, {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}, {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+			{{-0.5f, -0.5f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}, {{0.5f, -0.5f ,1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}}, {{0.5f, 0.5f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}, {{-0.5f, 0.5f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}}
+		};
+		const std::vector<uint32_t> rectangleIndices = { 0, 1, 2, 2, 3, 0, 1, 5, 2, 5, 6, 2, 3, 2, 6, 3, 6, 7 };
+
+		auto stagingBuffer = new Buffer(device, physicalDevice);
+		stagingBuffer->Allocate(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, rectangleVertices.size() * sizeof(rectangleVertices[0]));
+		stagingBuffer->FillData(rectangleVertices.size() * sizeof(rectangleVertices[0]), &rectangleVertices[0]);
+		rectangleVertexBuffer = new Buffer(device, physicalDevice);
+		rectangleVertexBuffer->Allocate(VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, rectangleVertices.size() * sizeof(rectangleVertices[0]));
+		commandPool->ExecuteBufferCopy(stagingBuffer, rectangleVertexBuffer, rectangleVertices.size() * sizeof(rectangleVertices[0]), graphicsQueue);
+		delete stagingBuffer;
+
+
+		stagingBuffer = new Buffer(device, physicalDevice);
+		stagingBuffer->Allocate(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, rectangleIndices.size() * sizeof(rectangleIndices[0]));
+		stagingBuffer->FillData(rectangleIndices.size() * sizeof(rectangleIndices[0]), &rectangleIndices[0]);
+		rectangleIndexBuffer = new Buffer(device, physicalDevice);
+		rectangleIndexBuffer->Allocate(VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, rectangleIndices.size() * sizeof(rectangleIndices[0]));
+		commandPool->ExecuteBufferCopy(stagingBuffer, rectangleIndexBuffer, rectangleIndices.size() * sizeof(rectangleIndices[0]), graphicsQueue);
+		delete stagingBuffer;
+		commandPool->SubmitRenderPass(renderPass, swapChainFramebuffers, swapChain->GetExtent(), graphicsPipeline, rectangleVertexBuffer, rectangleIndexBuffer, static_cast<uint32_t>(rectangleIndices.size()));
+	}
+
+	void createVulkanUniformBuffers()
+	{
+		uniformBuffers.resize(swapChain->GetNumImages());
+		for (size_t i = 0; i < swapChain->GetNumImages(); ++i)
+		{
+			uniformBuffers[i] = new Buffer(device, physicalDevice);
+			uniformBuffers[i]->Allocate(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, sizeof(UBO));
+		}
 	}
 
 	void createVulkanSyncObjects() {
@@ -382,31 +433,25 @@ private:
 		}
 	}
 
-	bool isVkValidationLayerSupported() {
-		uint32_t layerCount;
-		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+	void updateUniformBuffer(uint32_t index)
+	{
+		static auto startTime = std::chrono::high_resolution_clock::now();
 
-		std::vector<VkLayerProperties> availableLayers(layerCount);
-		vkEnumerateInstanceLayerProperties(&layerCount, &availableLayers[0]);
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-		for (const char* layerName : VK_VALIDATION_LAYERS) {
-			bool layerFound = false;
+		auto aspectRatio = static_cast<float>(swapChain->GetExtent().width) / static_cast<float>(swapChain->GetExtent().height);
+		
+		UBO ubo = {
+			.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			.proj = glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 10.0f)
+		};
 
-			for (const auto& layerProperties : availableLayers) {
-				if (strcmp(layerName, layerProperties.layerName) == 0) {
-					layerFound = true;
-					break;
-				}
-			}
-
-			if (!layerFound) {
-				return false;
-			}
-		}
-
-		return true;
+		ubo.proj[1][1] *= -1;
+		uniformBuffers[index]->FillData(sizeof(ubo), &ubo);
 	}
-
+	
 	void renderFrame() {
 		vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -424,6 +469,8 @@ private:
 		VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
 		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
+
+		updateUniformBuffer(imageIndex);
 		
 		VkSubmitInfo submitInfo = {
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -488,6 +535,7 @@ private:
 		renderPass = new RenderPass(device, swapChain->GetImageFormat());
 		createVulkanGraphicsPipeline();
 		createVulkanFramebuffers();
+		createVulkanUniformBuffers();
 		createVulkanCommandBuffers();
 	}
 

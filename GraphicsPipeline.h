@@ -13,7 +13,7 @@
 class GraphicsPipeline
 {
 public:
-	GraphicsPipeline(const VkDevice& logicalDevice, const std::stringstream& vertexShaderSource, const std::stringstream& fragmentShaderSource, const std::string& name, const VkExtent2D& extent, RenderPass*& renderPass) : logicalDevice(logicalDevice), name(name)
+	GraphicsPipeline(const VkDevice& logicalDevice, const std::stringstream& vertexShaderSource, const std::stringstream& fragmentShaderSource, const std::string& name, const VkExtent2D& extent, RenderPass*& renderPass, const VkDescriptorSetLayout& descriptorSetLayout) : logicalDevice(logicalDevice), name(name)
 	{
 		ShaderModule vertexShaderModule(logicalDevice, vertexShaderSource);
 		ShaderModule fragmentShaderModule(logicalDevice, fragmentShaderSource);
@@ -117,7 +117,7 @@ public:
 			.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 		};
 
-		pipelineLayout = new PipelineLayout(logicalDevice);
+		pipelineLayout = new PipelineLayout(logicalDevice, descriptorSetLayout);
 
 		VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = {
 			.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
