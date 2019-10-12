@@ -67,15 +67,14 @@ public:
 
 	~SwapChain()
 	{
-		vkDestroySwapchainKHR(parentLogicalDevice_, swapChainHandle_, nullptr);
 	}
 
-	const VkSwapchainKHR& GetHandle() const
+	const vk::SwapchainKHR& GetHandle() const
 	{
 		return swapChainHandle_;
 	}
 
-	const std::vector<VkImage>& GetImages() const
+	const std::vector<vk::Image>& GetImages() const
 	{
 		return images_;
 	}
@@ -85,7 +84,7 @@ public:
 		return images_.size();
 	}
 
-	const VkFormat GetImageFormat() const
+	const vk::Format GetImageFormat() const
 	{
 		return imageFormat_;
 	}
@@ -97,8 +96,8 @@ public:
 private:
 	LogicalDevice* parentLogicalDevice_;
 	Surface* parentSurface_;
-	VkSwapchainKHR swapChainHandle_;
-	std::vector<VkImage> images_;
-	VkFormat imageFormat_;
-	VkExtent2D extent_;
+	vk::SwapchainKHR swapChainHandle_;
+	std::vector<vk::Image> images_;
+	vk::Format imageFormat_;
+	vk::Extent2D extent_;
 };
