@@ -134,23 +134,9 @@
   <ItemGroup>
     <ClInclude Include="Application.h" />
     <ClInclude Include="assets\shaders\GraphicsHeaders.h" />
-    <ClInclude Include="Buffer.h" />
-    <ClInclude Include="CommandPool.h" />
-    <ClInclude Include="Framebuffer.h" />
-    <ClInclude Include="GraphicsPipeline.h" />
-    <ClInclude Include="ImageView.h" />
-    <ClInclude Include="IndexBuffer.h" />
-    <ClInclude Include="Instance.h" />
-    <ClInclude Include="LogicalDevice.h" />
     <ClInclude Include="Particle.h" />
-    <ClInclude Include="PhysicalDevice.h" />
-    <ClInclude Include="PipelineLayout.h" />
-    <ClInclude Include="RenderPass.h" />
-    <ClInclude Include="ShaderModule.h" />
-    <ClInclude Include="Surface.h" />
-    <ClInclude Include="SwapChain.h" />
+    <ClInclude Include="stb\stb_image.h" />
     <ClInclude Include="Vertex.h" />
-    <ClInclude Include="VertexBuffer.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="assets\shaders\main.frag" />

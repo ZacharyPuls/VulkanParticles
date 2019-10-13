@@ -6,13 +6,14 @@ layout(location = 1) in vec4 inColor;
 
 layout(location = 0) out vec4 fragColor;
 
-layout(binding = 0) uniform UBO {
-	mat4 model;
-	mat4 view;
-	mat4 proj;
-};
+layout(binding = 0) uniform ModelViewProj {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+} mvp;
 
 void main() {
-	gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
-	fragColor = inColor;
+    gl_Position = mvp.proj * mvp.view * mvp.model * vec4(inPosition, 1.0);
+    fragColor = inColor;
 }
+
