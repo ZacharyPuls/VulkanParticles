@@ -134,8 +134,10 @@
   <ItemGroup>
     <ClInclude Include="Application.h" />
     <ClInclude Include="assets\shaders\GraphicsHeaders.h" />
+    <ClInclude Include="Buffer.h" />
     <ClInclude Include="Particle.h" />
     <ClInclude Include="stb\stb_image.h" />
+    <ClInclude Include="Texture.h" />
     <ClInclude Include="Vertex.h" />
   </ItemGroup>
   <ItemGroup>

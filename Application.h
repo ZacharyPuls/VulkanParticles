@@ -13,6 +13,8 @@
 #include <sstream>
 #include <fstream>
 #include "Vertex.h"
+#include "Buffer.h"
+#include "Texture.h"
 
 const std::vector<const char*> VK_VALIDATION_LAYERS = {
 	"VK_LAYER_KHRONOS_validation"
@@ -53,6 +55,7 @@ public:
 		CreateVulkanGraphicsPipeline();
 		CreateVulkanFramebuffers();
 		CreateVulkanCommandPool();
+		CreateVulkanTexture();
 		CreateVulkanVertexBuffer();
 		CreateVulkanIndexBuffer();
 		CreateVulkanUniformBuffers();
@@ -78,8 +81,8 @@ private:
 	GLFWwindow* appWindow_;
 	vk::Instance instance_;
 	vk::SurfaceKHR surface_;
-	vk::PhysicalDevice physicalDevice_;
-	vk::Device logicalDevice_;
+	std::shared_ptr<vk::PhysicalDevice> physicalDevice_;
+	std::shared_ptr<vk::Device> logicalDevice_;
 	vk::Queue graphicsQueue_;
 	vk::Queue presentQueue_;
 	vk::SwapchainKHR swapchain_;
@@ -97,12 +100,11 @@ private:
 	vk::CommandPool commandPool_;
 	std::vector<vk::CommandBuffer> commandBuffers_;
 
-	vk::Buffer vertexBuffer_;
-	vk::DeviceMemory vertexBufferMemory_;
-	vk::Buffer indexBuffer_;
-	vk::DeviceMemory indexBufferMemory_;
-	std::vector<vk::Buffer> uniformBuffers_;
-	std::vector<vk::DeviceMemory> uniformBuffersMemory_;
+	std::unique_ptr<Texture> rockTexture_;
+
+	std::unique_ptr<Buffer> vertexBuffer_;
+	std::unique_ptr<Buffer>indexBuffer_;
+	std::vector<std::unique_ptr<Buffer>> uniformBuffers_;
 	
 	std::vector<vk::Semaphore> imageAvailableSemaphores_;
 	std::vector<vk::Semaphore> renderFinishedSemaphores_;
@@ -303,7 +305,7 @@ private:
 		{
 			if (isVulkanPhysicalDeviceSuitable(device))
 			{
-				physicalDevice_ = device;
+				physicalDevice_ = std::make_shared<vk::PhysicalDevice>(device);
 				break;
 			}
 		}
@@ -318,7 +320,7 @@ private:
 
 	void CreateVulkanLogicalDevice()
 	{
-		QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
+		QueueFamilyIndices indices = findQueueFamilies(*physicalDevice_);
 
 		std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 		std::set<uint32_t> uniqueQueueFamilies = {indices.GraphicsFamily.value(), indices.PresentFamily.value()};
@@ -333,7 +335,7 @@ private:
 		auto enabledLayers = ENABLE_VK_VALIDATION_LAYERS ? &VK_VALIDATION_LAYERS[0] : nullptr;
 
 		vk::PhysicalDeviceFeatures physicalDeviceFeatures;
-		logicalDevice_ = physicalDevice_.createDevice(vk::DeviceCreateInfo({},
+		logicalDevice_ = std::make_shared<vk::Device>(physicalDevice_->createDevice(vk::DeviceCreateInfo({},
 		                                                                   static_cast<uint32_t>(queueCreateInfos.size()
 		                                                                   ),
 		                                                                   &queueCreateInfos[0], enabledLayerCount,
@@ -341,7 +343,7 @@ private:
 		                                                                   static_cast<uint32_t>(
 			                                                                   REQUIRED_DEVICE_EXTENSIONS.size()),
 		                                                                   &REQUIRED_DEVICE_EXTENSIONS[0],
-		                                                                   &physicalDeviceFeatures));
+		                                                                   &physicalDeviceFeatures)));
 
 		if (!logicalDevice_)
 		{
@@ -349,8 +351,8 @@ private:
 				"Could not create vk::Device. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
 
-		graphicsQueue_ = logicalDevice_.getQueue(indices.GraphicsFamily.value(), 0);
-		presentQueue_ = logicalDevice_.getQueue(indices.PresentFamily.value(), 0);
+		graphicsQueue_ = logicalDevice_->getQueue(indices.GraphicsFamily.value(), 0);
+		presentQueue_ = logicalDevice_->getQueue(indices.PresentFamily.value(), 0);
 	}
 
 	vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats)
@@ -404,12 +406,12 @@ private:
 
 	void CreateVulkanSwapchain()
 	{
-		const auto swapChainSupport = querySwapChainSupport(physicalDevice_);
+		const auto swapChainSupport = querySwapChainSupport(*physicalDevice_);
 
 		const auto surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.Formats);
 		const auto presentMode = chooseSwapPresentMode(swapChainSupport.PresentModes);
 		const auto extent = chooseSwapExtent(swapChainSupport.Capabilities);
-		auto indices = findQueueFamilies(physicalDevice_);
+		auto indices = findQueueFamilies(*physicalDevice_);
 
 		auto imageCount = swapChainSupport.Capabilities.minImageCount + 1;
 		if (swapChainSupport.Capabilities.maxImageCount > 0 && imageCount > swapChainSupport.Capabilities.maxImageCount)
@@ -426,7 +428,7 @@ private:
 				                          indices.GraphicsFamily.value(), indices.PresentFamily.value()
 			                          })
 			                          : std::vector<uint32_t>();
-		swapchain_ = logicalDevice_.createSwapchainKHR(vk::SwapchainCreateInfoKHR({}, surface_,
+		swapchain_ = logicalDevice_->createSwapchainKHR(vk::SwapchainCreateInfoKHR({}, surface_,
 		                                                                          imageCount,
 		                                                                          surfaceFormat.format,
 		                                                                          surfaceFormat.colorSpace,
@@ -450,7 +452,7 @@ private:
 				"Could not create vk::SwapchainKHR. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
 
-		swapchainImages_ = logicalDevice_.getSwapchainImagesKHR(swapchain_);
+		swapchainImages_ = logicalDevice_->getSwapchainImagesKHR(swapchain_);
 		swapchainImageFormat_ = surfaceFormat.format;
 		swapchainExtent_ = extent;
 	}
@@ -459,7 +461,7 @@ private:
 	{
 		for (const auto image : swapchainImages_)
 		{
-			auto imageView = logicalDevice_.createImageView(vk::ImageViewCreateInfo(
+			auto imageView = logicalDevice_->createImageView(vk::ImageViewCreateInfo(
 				{}, image,
 				vk::ImageViewType::e2D, swapchainImageFormat_,
 				{},
@@ -487,7 +489,7 @@ private:
 			VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput,
 			vk::PipelineStageFlagBits::eColorAttachmentOutput, {},
 			vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite);
-		renderPass_ = logicalDevice_.createRenderPass(vk::RenderPassCreateInfo({}, 1, &colorAttachment, 1,
+		renderPass_ = logicalDevice_->createRenderPass(vk::RenderPassCreateInfo({}, 1, &colorAttachment, 1,
 		                                                                       &subpass, 1, &subpassDependency));
 
 		if (!renderPass_)
@@ -501,7 +503,7 @@ private:
 	{
 		vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex);
 		vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, 1, &descriptorSetLayoutBinding);
-		descriptorSetLayout_ = logicalDevice_.createDescriptorSetLayout(descriptorSetLayoutCreateInfo);
+		descriptorSetLayout_ = logicalDevice_->createDescriptorSetLayout(descriptorSetLayoutCreateInfo);
 	}
 
 	static std::stringstream ReadFile(const std::string& filename)
@@ -524,7 +526,7 @@ private:
 	vk::ShaderModule CreateShaderModule(const std::stringstream& code) const
 	{
 		const auto codeString = code.str();
-		return logicalDevice_.createShaderModule(vk::ShaderModuleCreateInfo(
+		return logicalDevice_->createShaderModule(vk::ShaderModuleCreateInfo(
 			{}, codeString.length(), reinterpret_cast<const uint32_t*>(&codeString[0])));
 	}
 
@@ -568,14 +570,14 @@ private:
 			{}, VK_FALSE, vk::LogicOp::eCopy, 1, &pipelineColorBlendAttachmentState);
 
 		vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, 1, &descriptorSetLayout_);
-		graphicsPipelineLayout_ = logicalDevice_.createPipelineLayout(pipelineLayoutCreateInfo);
+		graphicsPipelineLayout_ = logicalDevice_->createPipelineLayout(pipelineLayoutCreateInfo);
 		if (!graphicsPipelineLayout_)
 		{
 			throw std::runtime_error(
 				"Could not create vk::PipelineLayout for the Vulkan graphics pipeline. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
 
-		graphicsPipeline_ = logicalDevice_.createGraphicsPipeline(nullptr, {
+		graphicsPipeline_ = logicalDevice_->createGraphicsPipeline(nullptr, {
 			                                      {}, 2, pipelineShaderStageCreateInfos,
 			                                      &pipelineVertexInputStateCreateInfo,
 			                                      &pipelineInputAssemblyStateCreateInfo, nullptr,
@@ -591,8 +593,8 @@ private:
 				"Could not create vk::Pipeline for the Vulkan graphics pipeline. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
 
-		logicalDevice_.destroyShaderModule(vertexShaderModule);
-		logicalDevice_.destroyShaderModule(fragmentShaderModule);
+		logicalDevice_->destroyShaderModule(vertexShaderModule);
+		logicalDevice_->destroyShaderModule(fragmentShaderModule);
 	}
 
 	void CreateVulkanFramebuffers()
@@ -602,7 +604,7 @@ private:
 			const vk::ImageView attachments[] = {imageView};
 			vk::FramebufferCreateInfo framebufferCreateInfo({}, renderPass_, 1, attachments, swapchainExtent_.width,
 			                                                swapchainExtent_.height, 1);
-			auto framebuffer = logicalDevice_.createFramebuffer(framebufferCreateInfo);
+			auto framebuffer = logicalDevice_->createFramebuffer(framebufferCreateInfo);
 			if (!framebuffer)
 			{
 				throw std::runtime_error("Could not create vk::Framebuffer for given imageView.");
@@ -613,9 +615,9 @@ private:
 
 	void CreateVulkanCommandPool()
 	{
-		auto queueFamilyIndices = findQueueFamilies(physicalDevice_);
+		auto queueFamilyIndices = findQueueFamilies(*physicalDevice_);
 		const vk::CommandPoolCreateInfo commandPoolCreateInfo({}, queueFamilyIndices.GraphicsFamily.value());
-		commandPool_ = logicalDevice_.createCommandPool(commandPoolCreateInfo);
+		commandPool_ = logicalDevice_->createCommandPool(commandPoolCreateInfo);
 		if (!commandPool_)
 		{
 			throw std::runtime_error(
@@ -623,82 +625,72 @@ private:
 		}
 	}
 
+	void CreateVulkanTexture()
+	{
+		rockTexture_.reset(new Texture("assets/textures/rocks_05/col.jpg", logicalDevice_, physicalDevice_, commandPool_, graphicsQueue_));
+	}
+
 	void CreateVulkanVertexBuffer()
 	{
 		const auto bufferSize = sizeof(vertices[0]) * vertices.size();
 
-		vk::Buffer stagingBuffer;
-		vk::DeviceMemory stagingBufferMemory;
-		CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
-		             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-		             stagingBuffer, stagingBufferMemory);
-
-		const auto data = logicalDevice_.mapMemory(stagingBufferMemory, 0, bufferSize);
-		memcpy(data, &vertices[0], static_cast<size_t>(bufferSize));
-		logicalDevice_.unmapMemory(stagingBufferMemory);
-
-		CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
-		             vk::MemoryPropertyFlagBits::eDeviceLocal, vertexBuffer_, vertexBufferMemory_);
-
-		CopyBuffer(stagingBuffer, vertexBuffer_, bufferSize);
-
-		logicalDevice_.destroyBuffer(stagingBuffer);
-		logicalDevice_.freeMemory(stagingBufferMemory);
+		const auto stagingBuffer = std::make_unique<Buffer>(logicalDevice_, physicalDevice_, bufferSize,
+		                                                    vk::BufferUsageFlagBits::eTransferSrc,
+		                                                    vk::SharingMode::eExclusive,
+		                                                    vk::MemoryPropertyFlagBits::eHostVisible | vk::
+		                                                    MemoryPropertyFlagBits::eHostCoherent);
+		stagingBuffer->Fill(0, bufferSize, &vertices[0]);
+		vertexBuffer_.reset(new Buffer(logicalDevice_, physicalDevice_, bufferSize,
+		                               vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+		                               {}, vk::MemoryPropertyFlagBits::eDeviceLocal));
+		Buffer::Copy(stagingBuffer, vertexBuffer_, bufferSize, commandPool_, graphicsQueue_);
 	}
 
 	void CreateVulkanIndexBuffer()
 	{
 		const auto bufferSize = sizeof(indices[0]) * indices.size();
-
-		vk::Buffer stagingBuffer;
-		vk::DeviceMemory stagingBufferMemory;
-		CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
-		             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-		             stagingBuffer, stagingBufferMemory);
-
-		const auto data = logicalDevice_.mapMemory(stagingBufferMemory, 0, bufferSize);
-		memcpy(data, indices.data(), static_cast<size_t>(bufferSize));
-		logicalDevice_.unmapMemory(stagingBufferMemory);
-
-		CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
-		             vk::MemoryPropertyFlagBits::eDeviceLocal, indexBuffer_, indexBufferMemory_);
-
-		CopyBuffer(stagingBuffer, indexBuffer_, bufferSize);
-
-		logicalDevice_.destroyBuffer(stagingBuffer);
-		logicalDevice_.freeMemory(stagingBufferMemory);
+		const auto stagingBuffer = std::make_unique<Buffer>(logicalDevice_, physicalDevice_, bufferSize,
+		                                                    vk::BufferUsageFlagBits::eTransferSrc,
+		                                                    vk::SharingMode::eExclusive,
+		                                                    vk::MemoryPropertyFlagBits::eHostVisible | vk::
+		                                                    MemoryPropertyFlagBits::eHostCoherent);
+		stagingBuffer->Fill(0, bufferSize, &indices[0]);
+		indexBuffer_.reset(new Buffer(logicalDevice_, physicalDevice_, bufferSize,
+		                              vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, {},
+		                              vk::MemoryPropertyFlagBits::eDeviceLocal));
+		Buffer::Copy(stagingBuffer, indexBuffer_, bufferSize, commandPool_, graphicsQueue_);
 	}
 
 	void CreateVulkanUniformBuffers()
 	{
 		auto bufferSize = sizeof(ModelViewProj);
 		uniformBuffers_.resize(swapchainImages_.size());
-		uniformBuffersMemory_.resize(swapchainImages_.size());
 
 		for (size_t i = 0; i < swapchainImages_.size(); ++i)
 		{
-			CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer,
-			             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-			             uniformBuffers_[i], uniformBuffersMemory_[i]);
+			uniformBuffers_[i].reset(new Buffer(logicalDevice_, physicalDevice_, bufferSize,
+			                                    vk::BufferUsageFlagBits::eUniformBuffer, {},
+			                                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::
+			                                    eHostCoherent));
 		}
 	}
 
 	void CreateVulkanDescriptorPool()
 	{
 		vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, static_cast<uint32_t>(swapchainImages_.size()));
-		descriptorPool_ = logicalDevice_.createDescriptorPool({ {}, static_cast<uint32_t>(swapchainImages_.size()), 1,& descriptorPoolSize });
+		descriptorPool_ = logicalDevice_->createDescriptorPool({ {}, static_cast<uint32_t>(swapchainImages_.size()), 1,& descriptorPoolSize });
 	}
 
 	void CreateVulkanDescriptorSets()
 	{
 		std::vector<vk::DescriptorSetLayout> descriptorSetLayoutTemplates(swapchainImages_.size(), descriptorSetLayout_);
-		descriptorSets_ = logicalDevice_.allocateDescriptorSets({
+		descriptorSets_ = logicalDevice_->allocateDescriptorSets({
 			descriptorPool_, static_cast<uint32_t>(swapchainImages_.size()), &descriptorSetLayoutTemplates[0]
 		});
 		for (size_t i = 0; i < swapchainImages_.size(); ++i)
 		{
-			vk::DescriptorBufferInfo descriptorBufferInfo(uniformBuffers_[i], 0, sizeof(ModelViewProj));
-			logicalDevice_.updateDescriptorSets(
+			vk::DescriptorBufferInfo descriptorBufferInfo(uniformBuffers_[i]->GetHandle(), 0, sizeof(ModelViewProj));
+			logicalDevice_->updateDescriptorSets(
 				{
 					{
 						descriptorSets_[i], 0, 0, 1, vk::DescriptorType::eUniformBuffer, {},
@@ -708,79 +700,12 @@ private:
 		}
 	}
 
-	uint32_t FindMemoryType(const uint32_t typeFilter, const vk::MemoryPropertyFlags properties) const
-	{
-		auto physicalDeviceMemoryProperties = physicalDevice_.getMemoryProperties();
-
-		for (uint32_t i = 0; i < physicalDeviceMemoryProperties.memoryTypeCount; i++)
-		{
-			if ((typeFilter & (1 << i)) && (physicalDeviceMemoryProperties.memoryTypes[i].propertyFlags & properties) ==
-				properties)
-			{
-				return i;
-			}
-		}
-
-		throw std::runtime_error(
-			"Could not find vk::MemoryType that matches given filter: type=" + std::to_string(typeFilter) +
-			", properties=" + std::to_string(static_cast<uint32_t>(properties)) + ".");
-	}
-
-	void CreateBuffer(const vk::DeviceSize size, const vk::BufferUsageFlags usage,
-	                  const vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory)
-	{
-		const vk::BufferCreateInfo bufferCreateInfo({}, size, usage, vk::SharingMode::eExclusive);
-		buffer = logicalDevice_.createBuffer(bufferCreateInfo);
-		const auto memoryRequirements = logicalDevice_.getBufferMemoryRequirements(buffer);
-
-		const vk::MemoryAllocateInfo memoryAllocateInfo(memoryRequirements.size,
-		                                                FindMemoryType(memoryRequirements.memoryTypeBits, properties));
-
-		bufferMemory = logicalDevice_.allocateMemory(memoryAllocateInfo);
-
-		if (!bufferMemory)
-		{
-			throw std::runtime_error(
-				"Could not allocate vk::Buffer(s). Verify your hardware is supported, and your drivers are up-to-date.");
-		}
-
-		logicalDevice_.bindBufferMemory(buffer, bufferMemory, 0);
-	}
-
-	void CopyBuffer(const vk::Buffer srcBuffer, const vk::Buffer dstBuffer, const vk::DeviceSize size) const
-	{
-		const vk::CommandBufferAllocateInfo
-			commandBufferAllocateInfo(commandPool_, vk::CommandBufferLevel::ePrimary, 1);
-		auto commandBuffers = logicalDevice_.allocateCommandBuffers(commandBufferAllocateInfo);
-		if (commandBuffers.empty())
-		{
-			throw std::runtime_error("Could not allocate command buffer for copyBuffer method.");
-		}
-		auto commandBuffer = commandBuffers[0];
-
-		const vk::CommandBufferBeginInfo commandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-		commandBuffer.begin(commandBufferBeginInfo);
-
-		vk::BufferCopy bufferCopy({}, {}, size);
-		commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &bufferCopy);
-		commandBuffer.end();
-
-		vk::SubmitInfo submitInfo({}, {}, {}, 1, &commandBuffer);
-		if (graphicsQueue_.submit(1, &submitInfo, nullptr) != vk::Result::eSuccess)
-		{
-			throw std::runtime_error("Could not submit buffer copy operation to Vulkan graphics queue.");
-		}
-		graphicsQueue_.waitIdle();
-
-		logicalDevice_.freeCommandBuffers(commandPool_, commandBuffers);
-	}
-
 	void CreateVulkanCommandBuffers()
 	{
 		const vk::CommandBufferAllocateInfo commandBufferAllocateInfo(commandPool_, vk::CommandBufferLevel::ePrimary,
 		                                                              static_cast<uint32_t>(swapchainFramebuffers_.
 			                                                              size()));
-		commandBuffers_ = logicalDevice_.allocateCommandBuffers(commandBufferAllocateInfo);
+		commandBuffers_ = logicalDevice_->allocateCommandBuffers(commandBufferAllocateInfo);
 		if (commandBuffers_.empty())
 		{
 			throw std::runtime_error(
@@ -799,8 +724,8 @@ private:
 
 			buffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
 			buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
-			buffer.bindVertexBuffers(0, vertexBuffer_, static_cast<vk::DeviceSize>(0));
-			buffer.bindIndexBuffer(indexBuffer_, 0, vk::IndexType::eUint16);
+			buffer.bindVertexBuffers(0, vertexBuffer_->GetHandle(), static_cast<vk::DeviceSize>(0));
+			buffer.bindIndexBuffer(indexBuffer_->GetHandle(), 0, vk::IndexType::eUint16);
 			buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, graphicsPipelineLayout_, 0, 1,
 			                          &descriptorSets_[i], 0, nullptr);
 			buffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
@@ -816,7 +741,7 @@ private:
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			auto imageAvailableSemaphore = logicalDevice_.createSemaphore(semaphoreCreateInfo);
+			auto imageAvailableSemaphore = logicalDevice_->createSemaphore(semaphoreCreateInfo);
 			if (!imageAvailableSemaphore)
 			{
 				throw std::runtime_error(
@@ -824,7 +749,7 @@ private:
 					"] - imageAvailableSemaphore.");
 			}
 			imageAvailableSemaphores_.push_back(imageAvailableSemaphore);
-			auto renderFinishedSemaphore = logicalDevice_.createSemaphore(semaphoreCreateInfo);
+			auto renderFinishedSemaphore = logicalDevice_->createSemaphore(semaphoreCreateInfo);
 			if (!renderFinishedSemaphore)
 			{
 				throw std::runtime_error(
@@ -832,7 +757,7 @@ private:
 					"] - renderFinishedSemaphore.");
 			}
 			renderFinishedSemaphores_.push_back(renderFinishedSemaphore);
-			auto inFlightFence = logicalDevice_.createFence(fenceCreateInfo);
+			auto inFlightFence = logicalDevice_->createFence(fenceCreateInfo);
 			if (!inFlightFence)
 			{
 				throw std::runtime_error(
@@ -872,7 +797,7 @@ private:
 			glfwWaitEvents();
 		}
 
-		logicalDevice_.waitIdle();
+		logicalDevice_->waitIdle();
 
 		CleanupVulkanSwapchain();
 
@@ -894,20 +819,21 @@ private:
 		auto currentTime = std::chrono::high_resolution_clock::now();
 		auto deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-		ModelViewProj mvp;
-		mvp.Model = glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		mvp.View = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		mvp.Proj = glm::perspective(glm::radians(45.0f), swapchainExtent_.width / static_cast<float>(swapchainExtent_.height), 0.1f, 10.0f);
+		ModelViewProj mvp = {
+			glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			glm::perspective(glm::radians(45.0f), swapchainExtent_.width / static_cast<float>(swapchainExtent_.height),
+			                 0.1f, 10.0f)
+		};
+
 		mvp.Proj[1][1] *= -1.0f;
 
-		auto data = logicalDevice_.mapMemory(uniformBuffersMemory_[index], 0, sizeof(mvp));
-		memcpy(data, &mvp, sizeof(mvp));
-		logicalDevice_.unmapMemory(uniformBuffersMemory_[index]);
+		uniformBuffers_[index]->Fill(0, sizeof(mvp), &mvp);
 	}
 
 	void RenderFrame()
 	{
-		auto result = logicalDevice_.waitForFences(inFlightFences_, VK_TRUE, UINT64_MAX);
+		auto result = logicalDevice_->waitForFences(inFlightFences_, VK_TRUE, UINT64_MAX);
 
 		if (result != vk::Result::eSuccess)
 		{
@@ -915,7 +841,7 @@ private:
 		}
 		
 		uint32_t imageIndex;
-		result = logicalDevice_.acquireNextImageKHR(swapchain_, UINT64_MAX,
+		result = logicalDevice_->acquireNextImageKHR(swapchain_, UINT64_MAX,
 		                                                 imageAvailableSemaphores_[currentFrame], nullptr, &imageIndex);
 
 		if (result == vk::Result::eErrorOutOfDateKHR)
@@ -936,7 +862,7 @@ private:
 		vk::Semaphore signalSemaphores[] = {renderFinishedSemaphores_[currentFrame]};
 		const vk::SubmitInfo submitInfo(1, waitSemaphores, waitStages, 1, &commandBuffers_[imageIndex], 1, signalSemaphores);
 
-		logicalDevice_.resetFences(inFlightFences_[currentFrame]);
+		logicalDevice_->resetFences(inFlightFences_[currentFrame]);
 		graphicsQueue_.submit(submitInfo, inFlightFences_[currentFrame]);
 
 		vk::SwapchainKHR swapchains[] = {swapchain_};
@@ -962,58 +888,55 @@ private:
 			glfwPollEvents();
 			RenderFrame();
 		}
-		logicalDevice_.waitIdle();
+		logicalDevice_->waitIdle();
 	}
 
 	void CleanupVulkanSwapchain()
 	{
 		for (const auto framebuffer : swapchainFramebuffers_)
 		{
-			logicalDevice_.destroyFramebuffer(framebuffer);
+			logicalDevice_->destroyFramebuffer(framebuffer);
 		}
 		swapchainFramebuffers_.clear();
 
-		logicalDevice_.freeCommandBuffers(commandPool_, commandBuffers_);
+		logicalDevice_->freeCommandBuffers(commandPool_, commandBuffers_);
 		commandBuffers_.clear();
 		
-		logicalDevice_.destroyPipeline(graphicsPipeline_);
-		logicalDevice_.destroyPipelineLayout(graphicsPipelineLayout_);
-		logicalDevice_.destroyRenderPass(renderPass_);
+		logicalDevice_->destroyPipeline(graphicsPipeline_);
+		logicalDevice_->destroyPipelineLayout(graphicsPipelineLayout_);
+		logicalDevice_->destroyRenderPass(renderPass_);
 
-		for (size_t i = 0; i < swapchainImages_.size(); i++) {
-			logicalDevice_.destroyBuffer(uniformBuffers_[i]);
-			logicalDevice_.freeMemory(uniformBuffersMemory_[i]);
+		for (size_t i = 0; i < uniformBuffers_.size(); i++) {
+			uniformBuffers_[i].reset();
 		}
 		
-		logicalDevice_.destroyDescriptorPool(descriptorPool_);
+		logicalDevice_->destroyDescriptorPool(descriptorPool_);
 		
 		for (const auto imageView : swapchainImageViews_)
 		{
-			logicalDevice_.destroyImageView(imageView);
+			logicalDevice_->destroyImageView(imageView);
 		}
 		swapchainImageViews_.clear();
 		
-		logicalDevice_.destroySwapchainKHR(swapchain_);
+		logicalDevice_->destroySwapchainKHR(swapchain_);
 	}
 
 	void CleanupVulkan()
 	{
 		CleanupVulkanSwapchain();
-		logicalDevice_.destroyDescriptorSetLayout(descriptorSetLayout_);
-		logicalDevice_.destroyBuffer(indexBuffer_);
-		logicalDevice_.freeMemory(indexBufferMemory_);
-		logicalDevice_.destroyBuffer(vertexBuffer_);
-		logicalDevice_.freeMemory(vertexBufferMemory_);
+		logicalDevice_->destroyDescriptorSetLayout(descriptorSetLayout_);
+		indexBuffer_.reset();
+		vertexBuffer_.reset();
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			logicalDevice_.destroySemaphore(renderFinishedSemaphores_[i]);
-			logicalDevice_.destroySemaphore(imageAvailableSemaphores_[i]);
-			logicalDevice_.destroyFence(inFlightFences_[i]);
+			logicalDevice_->destroySemaphore(renderFinishedSemaphores_[i]);
+			logicalDevice_->destroySemaphore(imageAvailableSemaphores_[i]);
+			logicalDevice_->destroyFence(inFlightFences_[i]);
 		}
 
-		logicalDevice_.destroyCommandPool(commandPool_);
-		logicalDevice_.destroy();
+		logicalDevice_->destroyCommandPool(commandPool_);
+		logicalDevice_->destroy();
 
 		instance_.destroySurfaceKHR(surface_);
 		instance_.destroy();
