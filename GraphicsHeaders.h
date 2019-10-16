@@ -52,6 +52,16 @@ namespace Util
 			", properties=" + std::to_string(static_cast<uint32_t>(properties)) + ".");
 	}
 
+	vk::Format FindSupportedFormat(const vk::PhysicalDevice& physicalDevice, const std::vector<vk::Format>& candidates, vk::ImageTiling imageTiling, vk::FormatFeatureFlags formatFeatureFlags)
+	{
+		return *std::find_if(candidates.begin(), candidates.end(), [physicalDevice, imageTiling, formatFeatureFlags](auto candidate)
+			{
+				auto physicalDeviceProperties = physicalDevice.getFormatProperties(candidate);
+				return (imageTiling == vk::ImageTiling::eLinear && (physicalDeviceProperties.linearTilingFeatures & formatFeatureFlags) == formatFeatureFlags) ||
+					(imageTiling == vk::ImageTiling::eOptimal && (physicalDeviceProperties.optimalTilingFeatures & formatFeatureFlags) == formatFeatureFlags);
+			});
+	}
+
 	static vk::CommandBuffer BeginOneTimeSubmitCommand(const vk::CommandPool& commandPool, const vk::Device* logicalDevice)
 	{
 		vk::CommandBufferAllocateInfo commandBufferAllocateInfo(commandPool, {}, 1);

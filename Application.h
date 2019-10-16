@@ -55,6 +55,7 @@ public:
 		CreateVulkanGraphicsPipeline();
 		CreateVulkanFramebuffers();
 		CreateVulkanCommandPool();
+		CreateVulkanDepthBuffer();
 		CreateVulkanTexture();
 		CreateVulkanVertexBuffer();
 		CreateVulkanIndexBuffer();
@@ -100,12 +101,16 @@ private:
 	vk::CommandPool commandPool_;
 	std::vector<vk::CommandBuffer> commandBuffers_;
 
+	vk::Image depthImage_;
+	vk::DeviceMemory depthMemory_;
+	vk::ImageView depthImageView_;
+	
 	std::unique_ptr<Texture> rockTexture_;
 
 	std::unique_ptr<Buffer> vertexBuffer_;
-	std::unique_ptr<Buffer>indexBuffer_;
+	std::unique_ptr<Buffer> indexBuffer_;
 	std::vector<std::unique_ptr<Buffer>> uniformBuffers_;
-	
+
 	std::vector<vk::Semaphore> imageAvailableSemaphores_;
 	std::vector<vk::Semaphore> renderFinishedSemaphores_;
 	std::vector<vk::Fence> inFlightFences_;
@@ -126,14 +131,20 @@ private:
 	inline static const int MAX_FRAMES_IN_FLIGHT = 2;
 
 	const std::vector<Vertex> vertices = {
-		{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-		{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-		{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}}
+		{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+		{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+
+		{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+		{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
+		{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+		{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 	};
 
 	const std::vector<uint16_t> indices = {
-		0, 1, 2, 2, 3, 0
+		0, 1, 2, 2, 3, 0,
+		4, 5, 6, 6, 7, 4
 	};
 
 	struct QueueFamilyIndices
@@ -154,12 +165,13 @@ private:
 		std::vector<vk::PresentModeKHR> PresentModes;
 	};
 
-	struct ModelViewProj {
+	struct ModelViewProj
+	{
 		alignas(16) glm::mat4 Model;
 		alignas(16) glm::mat4 View;
 		alignas(16) glm::mat4 Proj;
 	};
-	
+
 	void InitializeGlfw()
 	{
 		if (!glfwInit())
@@ -223,7 +235,7 @@ private:
 	}
 
 
-	bool checkDeviceExtensionSupport(const vk::PhysicalDevice physicalDevice)
+	bool CheckDeviceExtensionSupport(const vk::PhysicalDevice physicalDevice)
 	{
 		auto availableExtensions = physicalDevice.enumerateDeviceExtensionProperties();
 		std::set<std::string> requiredExtensions(REQUIRED_DEVICE_EXTENSIONS.begin(), REQUIRED_DEVICE_EXTENSIONS.end());
@@ -236,7 +248,13 @@ private:
 		return requiredExtensions.empty();
 	}
 
-	QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice physicalDevice)
+	bool CheckDeviceFeatureSupport(const vk::PhysicalDevice physicalDevice)
+	{
+		auto availableFeatures = physicalDevice.getFeatures();
+		return availableFeatures.samplerAnisotropy;
+	}
+
+	QueueFamilyIndices FindQueueFamilies(vk::PhysicalDevice physicalDevice)
 	{
 		QueueFamilyIndices indices;
 
@@ -266,7 +284,7 @@ private:
 		return indices;
 	}
 
-	SwapChainSupportDetails querySwapChainSupport(const vk::PhysicalDevice physicalDevice) const
+	SwapChainSupportDetails QuerySwapChainSupport(const vk::PhysicalDevice physicalDevice) const
 	{
 		return {
 			physicalDevice.getSurfaceCapabilitiesKHR(surface_),
@@ -276,19 +294,20 @@ private:
 	}
 
 
-	bool isVulkanPhysicalDeviceSuitable(const vk::PhysicalDevice physicalDevice)
+	bool IsVulkanPhysicalDeviceSuitable(const vk::PhysicalDevice physicalDevice)
 	{
-		auto indices = findQueueFamilies(physicalDevice);
-		const auto extensionsSupported = checkDeviceExtensionSupport(physicalDevice);
+		auto indices = FindQueueFamilies(physicalDevice);
+		const auto extensionsSupported = CheckDeviceExtensionSupport(physicalDevice);
+		const auto featuresSupported = CheckDeviceFeatureSupport(physicalDevice);
 
 		auto swapChainAdequate = false;
 		if (extensionsSupported)
 		{
-			const auto swapChainSupport = querySwapChainSupport(physicalDevice);
+			const auto swapChainSupport = QuerySwapChainSupport(physicalDevice);
 			swapChainAdequate = !swapChainSupport.Formats.empty() && !swapChainSupport.PresentModes.empty();
 		}
 
-		return indices.IsComplete() && extensionsSupported && swapChainAdequate;
+		return indices.IsComplete() && extensionsSupported && featuresSupported && swapChainAdequate;
 	}
 
 	void SelectVulkanPhysicalDevice()
@@ -303,7 +322,7 @@ private:
 
 		for (const auto& device : devices)
 		{
-			if (isVulkanPhysicalDeviceSuitable(device))
+			if (IsVulkanPhysicalDeviceSuitable(device))
 			{
 				physicalDevice_ = std::make_shared<vk::PhysicalDevice>(device);
 				break;
@@ -320,7 +339,7 @@ private:
 
 	void CreateVulkanLogicalDevice()
 	{
-		QueueFamilyIndices indices = findQueueFamilies(*physicalDevice_);
+		QueueFamilyIndices indices = FindQueueFamilies(*physicalDevice_);
 
 		std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 		std::set<uint32_t> uniqueQueueFamilies = {indices.GraphicsFamily.value(), indices.PresentFamily.value()};
@@ -335,15 +354,24 @@ private:
 		auto enabledLayers = ENABLE_VK_VALIDATION_LAYERS ? &VK_VALIDATION_LAYERS[0] : nullptr;
 
 		vk::PhysicalDeviceFeatures physicalDeviceFeatures;
+		physicalDeviceFeatures.samplerAnisotropy = VK_TRUE;
 		logicalDevice_ = std::make_shared<vk::Device>(physicalDevice_->createDevice(vk::DeviceCreateInfo({},
-		                                                                   static_cast<uint32_t>(queueCreateInfos.size()
-		                                                                   ),
-		                                                                   &queueCreateInfos[0], enabledLayerCount,
-		                                                                   enabledLayers,
-		                                                                   static_cast<uint32_t>(
-			                                                                   REQUIRED_DEVICE_EXTENSIONS.size()),
-		                                                                   &REQUIRED_DEVICE_EXTENSIONS[0],
-		                                                                   &physicalDeviceFeatures)));
+		                                                                                                 static_cast<
+			                                                                                                 uint32_t>(
+			                                                                                                 queueCreateInfos
+			                                                                                                 .size()
+		                                                                                                 ),
+		                                                                                                 &queueCreateInfos
+		                                                                                                 [0],
+		                                                                                                 enabledLayerCount,
+		                                                                                                 enabledLayers,
+		                                                                                                 static_cast<
+			                                                                                                 uint32_t>(
+			                                                                                                 REQUIRED_DEVICE_EXTENSIONS
+			                                                                                                 .size()),
+		                                                                                                 &REQUIRED_DEVICE_EXTENSIONS
+		                                                                                                 [0],
+		                                                                                                 &physicalDeviceFeatures)));
 
 		if (!logicalDevice_)
 		{
@@ -355,7 +383,7 @@ private:
 		presentQueue_ = logicalDevice_->getQueue(indices.PresentFamily.value(), 0);
 	}
 
-	vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats)
+	vk::SurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats)
 	{
 		for (const auto& availableFormat : availableFormats)
 		{
@@ -369,7 +397,7 @@ private:
 		return availableFormats[0];
 	}
 
-	vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes)
+	vk::PresentModeKHR ChooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes)
 	{
 		for (const auto& availablePresentMode : availablePresentModes)
 		{
@@ -382,7 +410,7 @@ private:
 		return vk::PresentModeKHR::eFifo;
 	}
 
-	vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities)
+	vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities)
 	{
 		if (capabilities.currentExtent.width != UINT32_MAX)
 		{
@@ -406,12 +434,12 @@ private:
 
 	void CreateVulkanSwapchain()
 	{
-		const auto swapChainSupport = querySwapChainSupport(*physicalDevice_);
+		const auto swapChainSupport = QuerySwapChainSupport(*physicalDevice_);
 
-		const auto surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.Formats);
-		const auto presentMode = chooseSwapPresentMode(swapChainSupport.PresentModes);
-		const auto extent = chooseSwapExtent(swapChainSupport.Capabilities);
-		auto indices = findQueueFamilies(*physicalDevice_);
+		const auto surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.Formats);
+		const auto presentMode = ChooseSwapPresentMode(swapChainSupport.PresentModes);
+		const auto extent = ChooseSwapExtent(swapChainSupport.Capabilities);
+		auto indices = FindQueueFamilies(*physicalDevice_);
 
 		auto imageCount = swapChainSupport.Capabilities.minImageCount + 1;
 		if (swapChainSupport.Capabilities.maxImageCount > 0 && imageCount > swapChainSupport.Capabilities.maxImageCount)
@@ -429,22 +457,22 @@ private:
 			                          })
 			                          : std::vector<uint32_t>();
 		swapchain_ = logicalDevice_->createSwapchainKHR(vk::SwapchainCreateInfoKHR({}, surface_,
-		                                                                          imageCount,
-		                                                                          surfaceFormat.format,
-		                                                                          surfaceFormat.colorSpace,
-		                                                                          extent, 1,
-		                                                                          vk::ImageUsageFlagBits::
-		                                                                          eColorAttachment,
-		                                                                          imageSharingMode,
-		                                                                          queueFamilyIndexCount,
-		                                                                          !queueFamilyIndices.empty()
-			                                                                          ? &queueFamilyIndices[0]
-			                                                                          : nullptr,
-		                                                                          swapChainSupport
-		                                                                          .Capabilities.currentTransform,
-		                                                                          vk::CompositeAlphaFlagBitsKHR::
-		                                                                          eOpaque,
-		                                                                          presentMode, VK_TRUE));
+		                                                                           imageCount,
+		                                                                           surfaceFormat.format,
+		                                                                           surfaceFormat.colorSpace,
+		                                                                           extent, 1,
+		                                                                           vk::ImageUsageFlagBits::
+		                                                                           eColorAttachment,
+		                                                                           imageSharingMode,
+		                                                                           queueFamilyIndexCount,
+		                                                                           !queueFamilyIndices.empty()
+			                                                                           ? &queueFamilyIndices[0]
+			                                                                           : nullptr,
+		                                                                           swapChainSupport
+		                                                                           .Capabilities.currentTransform,
+		                                                                           vk::CompositeAlphaFlagBitsKHR::
+		                                                                           eOpaque,
+		                                                                           presentMode, VK_TRUE));
 
 		if (!swapchain_)
 		{
@@ -490,7 +518,7 @@ private:
 			vk::PipelineStageFlagBits::eColorAttachmentOutput, {},
 			vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite);
 		renderPass_ = logicalDevice_->createRenderPass(vk::RenderPassCreateInfo({}, 1, &colorAttachment, 1,
-		                                                                       &subpass, 1, &subpassDependency));
+		                                                                        &subpass, 1, &subpassDependency));
 
 		if (!renderPass_)
 		{
@@ -501,8 +529,15 @@ private:
 
 	void CreateVulkanDescriptorSetLayout()
 	{
-		vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex);
-		vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo({}, 1, &descriptorSetLayoutBinding);
+		vk::DescriptorSetLayoutBinding uniformBufferBinding(0, vk::DescriptorType::eUniformBuffer, 1,
+		                                                    vk::ShaderStageFlagBits::eVertex);
+		vk::DescriptorSetLayoutBinding uniformSamplerBinding(1, vk::DescriptorType::eCombinedImageSampler, 1,
+		                                                     vk::ShaderStageFlagBits::eFragment);
+		const std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings = {
+			uniformSamplerBinding, uniformBufferBinding
+		};
+		vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo(
+			{}, static_cast<uint32_t>(descriptorSetLayoutBindings.size()), &descriptorSetLayoutBindings[0]);
 		descriptorSetLayout_ = logicalDevice_->createDescriptorSetLayout(descriptorSetLayoutCreateInfo);
 	}
 
@@ -549,7 +584,8 @@ private:
 		};
 		auto bindingDescription = Vertex::GetVertexInputBindingDescription();
 		auto attributeDescriptions = Vertex::GetVertexInputAttributeDescriptions();
-		vk::PipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo({}, 1, &bindingDescription, static_cast<uint32_t>(attributeDescriptions.size()), &attributeDescriptions[0]);
+		vk::PipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo(
+			{}, 1, &bindingDescription, static_cast<uint32_t>(attributeDescriptions.size()), &attributeDescriptions[0]);
 		vk::PipelineInputAssemblyStateCreateInfo pipelineInputAssemblyStateCreateInfo(
 			{}, vk::PrimitiveTopology::eTriangleList);
 		vk::Viewport viewport(0.0f, 0.0f, static_cast<float>(swapchainExtent_.width),
@@ -557,7 +593,8 @@ private:
 		vk::Rect2D scissor({0, 0}, swapchainExtent_);
 		vk::PipelineViewportStateCreateInfo pipelineViewportStateCreateInfo({}, 1, &viewport, 1, &scissor);
 		vk::PipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo(
-			{}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack, vk::FrontFace::eCounterClockwise,
+			{}, VK_FALSE, VK_FALSE, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack,
+			vk::FrontFace::eCounterClockwise,
 			VK_FALSE, 0.0f, 0.0f, 0.0f, 1.0f);
 		vk::PipelineMultisampleStateCreateInfo pipelineMultisampleStateCreateInfo(
 			{}, vk::SampleCountFlagBits::e1, VK_FALSE);
@@ -578,15 +615,15 @@ private:
 		}
 
 		graphicsPipeline_ = logicalDevice_->createGraphicsPipeline(nullptr, {
-			                                      {}, 2, pipelineShaderStageCreateInfos,
-			                                      &pipelineVertexInputStateCreateInfo,
-			                                      &pipelineInputAssemblyStateCreateInfo, nullptr,
-			                                      &pipelineViewportStateCreateInfo,
-			                                      &pipelineRasterizationStateCreateInfo,
-			                                      &pipelineMultisampleStateCreateInfo, nullptr,
-			                                      &pipelineColorBlendStateCreateInfo, nullptr,
-			                                      graphicsPipelineLayout_, renderPass_
-		                                      });
+			                                                           {}, 2, pipelineShaderStageCreateInfos,
+			                                                           &pipelineVertexInputStateCreateInfo,
+			                                                           &pipelineInputAssemblyStateCreateInfo, nullptr,
+			                                                           &pipelineViewportStateCreateInfo,
+			                                                           &pipelineRasterizationStateCreateInfo,
+			                                                           &pipelineMultisampleStateCreateInfo, nullptr,
+			                                                           &pipelineColorBlendStateCreateInfo, nullptr,
+			                                                           graphicsPipelineLayout_, renderPass_
+		                                                           });
 		if (!graphicsPipeline_)
 		{
 			throw std::runtime_error(
@@ -615,7 +652,7 @@ private:
 
 	void CreateVulkanCommandPool()
 	{
-		auto queueFamilyIndices = findQueueFamilies(*physicalDevice_);
+		auto queueFamilyIndices = FindQueueFamilies(*physicalDevice_);
 		const vk::CommandPoolCreateInfo commandPoolCreateInfo({}, queueFamilyIndices.GraphicsFamily.value());
 		commandPool_ = logicalDevice_->createCommandPool(commandPoolCreateInfo);
 		if (!commandPool_)
@@ -625,9 +662,21 @@ private:
 		}
 	}
 
+	void CreateVulkanDepthBuffer()
+	{
+		const auto imageFormat = Util::FindSupportedFormat(*physicalDevice_,
+		                                                   {
+			                                                   vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint,
+			                                                   vk::Format::eD24UnormS8Uint
+		                                                   }, vk::ImageTiling::eOptimal,
+		                                                   vk::FormatFeatureFlagBits::eDepthStencilAttachment);
+		
+	}
+
 	void CreateVulkanTexture()
 	{
-		rockTexture_.reset(new Texture("assets/textures/rocks_05/col.jpg", logicalDevice_, physicalDevice_, commandPool_, graphicsQueue_));
+		rockTexture_.reset(new Texture("assets/textures/rocks_05/col.jpg", logicalDevice_, physicalDevice_,
+		                               commandPool_, graphicsQueue_));
 	}
 
 	void CreateVulkanVertexBuffer()
@@ -677,24 +726,40 @@ private:
 
 	void CreateVulkanDescriptorPool()
 	{
-		vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, static_cast<uint32_t>(swapchainImages_.size()));
-		descriptorPool_ = logicalDevice_->createDescriptorPool({ {}, static_cast<uint32_t>(swapchainImages_.size()), 1,& descriptorPoolSize });
+		const std::vector<vk::DescriptorPoolSize> descriptorPoolSizes = {
+			{
+				vk::DescriptorType::eUniformBuffer,
+				static_cast<uint32_t>(swapchainImages_.size())
+			},
+			{
+				vk::DescriptorType::eCombinedImageSampler,
+				static_cast<uint32_t>(swapchainImages_.size())
+			}
+		};
+		descriptorPool_ = logicalDevice_->createDescriptorPool({
+			{}, static_cast<uint32_t>(swapchainImages_.size()), static_cast<uint32_t>(descriptorPoolSizes.size()), &descriptorPoolSizes[0]
+		});
 	}
 
 	void CreateVulkanDescriptorSets()
 	{
-		std::vector<vk::DescriptorSetLayout> descriptorSetLayoutTemplates(swapchainImages_.size(), descriptorSetLayout_);
+		std::vector<vk::DescriptorSetLayout>
+			descriptorSetLayoutTemplates(swapchainImages_.size(), descriptorSetLayout_);
 		descriptorSets_ = logicalDevice_->allocateDescriptorSets({
 			descriptorPool_, static_cast<uint32_t>(swapchainImages_.size()), &descriptorSetLayoutTemplates[0]
 		});
 		for (size_t i = 0; i < swapchainImages_.size(); ++i)
 		{
 			vk::DescriptorBufferInfo descriptorBufferInfo(uniformBuffers_[i]->GetHandle(), 0, sizeof(ModelViewProj));
+			auto descriptorImageInfo = rockTexture_->GenerateDescriptorImageInfo();
 			logicalDevice_->updateDescriptorSets(
 				{
 					{
 						descriptorSets_[i], 0, 0, 1, vk::DescriptorType::eUniformBuffer, {},
 						&descriptorBufferInfo
+					},
+					{
+						descriptorSets_[i], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &descriptorImageInfo
 					}
 				}, nullptr);
 		}
@@ -820,8 +885,9 @@ private:
 		auto deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
 		ModelViewProj mvp = {
-			glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-			glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+//			glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			glm::mat4(1.0f),
+			glm::lookAt(glm::vec3(1.0f, 0.75f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
 			glm::perspective(glm::radians(45.0f), swapchainExtent_.width / static_cast<float>(swapchainExtent_.height),
 			                 0.1f, 10.0f)
 		};
@@ -839,10 +905,10 @@ private:
 		{
 			throw std::runtime_error("Could not wait for Vulkan fences.");
 		}
-		
+
 		uint32_t imageIndex;
 		result = logicalDevice_->acquireNextImageKHR(swapchain_, UINT64_MAX,
-		                                                 imageAvailableSemaphores_[currentFrame], nullptr, &imageIndex);
+		                                             imageAvailableSemaphores_[currentFrame], nullptr, &imageIndex);
 
 		if (result == vk::Result::eErrorOutOfDateKHR)
 		{
@@ -856,20 +922,23 @@ private:
 		}
 
 		UpdateVulkanUniformBuffer(imageIndex);
-		
+
 		vk::Semaphore waitSemaphores[] = {imageAvailableSemaphores_[currentFrame]};
 		vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
 		vk::Semaphore signalSemaphores[] = {renderFinishedSemaphores_[currentFrame]};
-		const vk::SubmitInfo submitInfo(1, waitSemaphores, waitStages, 1, &commandBuffers_[imageIndex], 1, signalSemaphores);
+		const vk::SubmitInfo submitInfo(1, waitSemaphores, waitStages, 1, &commandBuffers_[imageIndex], 1,
+		                                signalSemaphores);
 
 		logicalDevice_->resetFences(inFlightFences_[currentFrame]);
 		graphicsQueue_.submit(submitInfo, inFlightFences_[currentFrame]);
 
 		vk::SwapchainKHR swapchains[] = {swapchain_};
 		const vk::PresentInfoKHR presentInfo(1, signalSemaphores, 1, swapchains, &imageIndex);
-		try {
+		try
+		{
 			presentQueue_.presentKHR(presentInfo);
-		} catch (vk::OutOfDateKHRError e)
+		}
+		catch (vk::OutOfDateKHRError e)
 		{
 			framebufferResized = false;
 			RecreateVulkanSwapchain();
@@ -901,23 +970,24 @@ private:
 
 		logicalDevice_->freeCommandBuffers(commandPool_, commandBuffers_);
 		commandBuffers_.clear();
-		
+
 		logicalDevice_->destroyPipeline(graphicsPipeline_);
 		logicalDevice_->destroyPipelineLayout(graphicsPipelineLayout_);
 		logicalDevice_->destroyRenderPass(renderPass_);
 
-		for (size_t i = 0; i < uniformBuffers_.size(); i++) {
+		for (size_t i = 0; i < uniformBuffers_.size(); i++)
+		{
 			uniformBuffers_[i].reset();
 		}
-		
+
 		logicalDevice_->destroyDescriptorPool(descriptorPool_);
-		
+
 		for (const auto imageView : swapchainImageViews_)
 		{
 			logicalDevice_->destroyImageView(imageView);
 		}
 		swapchainImageViews_.clear();
-		
+
 		logicalDevice_->destroySwapchainKHR(swapchain_);
 	}
 
@@ -927,6 +997,7 @@ private:
 		logicalDevice_->destroyDescriptorSetLayout(descriptorSetLayout_);
 		indexBuffer_.reset();
 		vertexBuffer_.reset();
+		rockTexture_.reset();
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
