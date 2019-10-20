@@ -36,10 +36,10 @@ public:
 		parentLogicalDevice_->freeMemory(memoryHandle_);
 	}
 
-	void CreateImageView(vk::ImageAspectFlags aspectFlags) 
+	void CreateImageView(vk::Format format, vk::ImageAspectFlags aspectFlags) 
 	{
 		imageView_ = parentLogicalDevice_->createImageView({ {}, imageHandle_, vk::ImageViewType::e2D,
-			vk::Format::eR8G8B8A8Unorm, {}, {
+			format, {}, {
 				aspectFlags, 0, 1, 0, 1
 			} });
 	}
@@ -47,15 +47,20 @@ public:
 	void TransitionLayout(const vk::CommandPool& commandPool, const vk::Queue& graphicsQueue, vk::Format format,
 		vk::ImageLayout oldLayout, vk::ImageLayout newLayout, vk::AccessFlags sourceAccessMask,
 		vk::AccessFlags destinationAccessMask, vk::PipelineStageFlags sourceStage,
-		vk::PipelineStageFlags destinationStage)
+		vk::PipelineStageFlags destinationStage, vk::ImageAspectFlags aspectFlags)
 	{
 		const auto commandBuffer = Util::BeginOneTimeSubmitCommand(commandPool, parentLogicalDevice_.get());
 		vk::ImageMemoryBarrier imageMemoryBarrier(sourceAccessMask, destinationAccessMask, oldLayout, newLayout, {}, {},
 			imageHandle_,
-			{ vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 });
+			{ aspectFlags, 0, 1, 0, 1 });
 		commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, {}, imageMemoryBarrier);
 		Util::EndOneTimeSubmitCommand(commandBuffer, commandPool, parentLogicalDevice_.get(),
 			graphicsQueue);
+	}
+
+	vk::ImageView GetImageView() const
+	{
+		return imageView_;
 	}
 
 protected:

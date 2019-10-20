@@ -27,15 +27,15 @@ public:
 
 		TransitionLayout(parentCommandPool_, parentGraphicsQueue_, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 		                 {}, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eTopOfPipe,
-		                 vk::PipelineStageFlagBits::eTransfer);
+		                 vk::PipelineStageFlagBits::eTransfer, vk::ImageAspectFlagBits::eColor);
 		Buffer::Copy(stagingBuffer, imageHandle_, {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1},
 		             parentCommandPool_, parentGraphicsQueue_);
 		TransitionLayout(parentCommandPool_, parentGraphicsQueue_, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eTransferDstOptimal,
 		                 vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eTransferWrite,
 		                 vk::AccessFlagBits::eShaderRead, vk::PipelineStageFlagBits::eTransfer,
-		                 vk::PipelineStageFlagBits::eFragmentShader);
+		                 vk::PipelineStageFlagBits::eFragmentShader, vk::ImageAspectFlagBits::eColor);
 
-		CreateImageView(vk::ImageAspectFlagBits::eColor);
+		CreateImageView(vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
 
 		vk::SamplerCreateInfo samplerCreateInfo({}, vk::Filter::eLinear, vk::Filter::eLinear,
 		                                        vk::SamplerMipmapMode::eLinear, {}, {}, {}, {}, VK_TRUE, 16.0f, {}, {},

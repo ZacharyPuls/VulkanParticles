@@ -15,6 +15,7 @@
 #include "Vertex.h"
 #include "Buffer.h"
 #include "Texture.h"
+#include "Mesh.h"
 
 const std::vector<const char*> VK_VALIDATION_LAYERS = {
 	"VK_LAYER_KHRONOS_validation"
@@ -53,12 +54,14 @@ public:
 		CreateVulkanRenderPass();
 		CreateVulkanDescriptorSetLayout();
 		CreateVulkanGraphicsPipeline();
-		CreateVulkanFramebuffers();
 		CreateVulkanCommandPool();
 		CreateVulkanDepthBuffer();
-		CreateVulkanTexture();
-		CreateVulkanVertexBuffer();
-		CreateVulkanIndexBuffer();
+		CreateVulkanFramebuffers();
+		chaletMesh_ = std::make_unique<Mesh>(logicalDevice_, physicalDevice_, commandPool_, graphicsQueue_,
+		                                     "assets/models/chalet/chalet.obj", "assets/models/chalet/chalet.jpg");
+		//CreateVulkanTexture();
+		//CreateVulkanVertexBuffer();
+		//CreateVulkanIndexBuffer();
 		CreateVulkanUniformBuffers();
 		CreateVulkanDescriptorPool();
 		CreateVulkanDescriptorSets();
@@ -102,11 +105,14 @@ private:
 	std::vector<vk::CommandBuffer> commandBuffers_;
 
 	std::unique_ptr<Image> depthImage_;
-	
+	/*
 	std::unique_ptr<Texture> rockTexture_;
-
 	std::unique_ptr<Buffer> vertexBuffer_;
 	std::unique_ptr<Buffer> indexBuffer_;
+	*/
+
+	std::unique_ptr<Mesh> chaletMesh_;
+	
 	std::vector<std::unique_ptr<Buffer>> uniformBuffers_;
 
 	std::vector<vk::Semaphore> imageAvailableSemaphores_;
@@ -127,23 +133,6 @@ private:
 	inline static const float VIEWPORT_MIN_DEPTH = 0.0f;
 	inline static const float VIEWPORT_MAX_DEPTH = 1.0f;
 	inline static const int MAX_FRAMES_IN_FLIGHT = 2;
-
-	const std::vector<Vertex> vertices = {
-		{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-		{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-		{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-
-		{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-		{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
-		{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-		{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-	};
-
-	const std::vector<uint16_t> indices = {
-		0, 1, 2, 2, 3, 0,
-		4, 5, 6, 6, 7, 4
-	};
 
 	struct QueueFamilyIndices
 	{
@@ -504,18 +493,32 @@ private:
 	void CreateVulkanRenderPass()
 	{
 		vk::AttachmentDescription colorAttachment({}, swapchainImageFormat_,
-		                                          vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
-		                                          vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare,
-		                                          vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
-		                                          vk::ImageLayout::ePresentSrcKHR);
+			vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
+			vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare,
+			vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
+			vk::ImageLayout::ePresentSrcKHR);
 		vk::AttachmentReference colorAttachmentReference(0, vk::ImageLayout::eColorAttachmentOptimal);
+		vk::AttachmentDescription depthAttachment({}, Util::FindSupportedFormat(*physicalDevice_,
+		                                                                        {
+			                                                                        vk::Format::eD32Sfloat,
+			                                                                        vk::Format::eD32SfloatS8Uint,
+			                                                                        vk::Format::eD24UnormS8Uint
+		                                                                        }, vk::ImageTiling::eOptimal,
+		                                                                        vk::FormatFeatureFlagBits::
+		                                                                        eDepthStencilAttachment),
+		                                          vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
+		                                          vk::AttachmentStoreOp::eDontCare, vk::AttachmentLoadOp::eDontCare,
+		                                          vk::AttachmentStoreOp::eDontCare, {},
+		                                          vk::ImageLayout::eDepthStencilAttachmentOptimal);
+		vk::AttachmentReference depthAttachmentReference(1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
 		vk::SubpassDescription subpass({}, vk::PipelineBindPoint::eGraphics, 0, nullptr, 1,
-		                               &colorAttachmentReference);
+		                               &colorAttachmentReference, {}, &depthAttachmentReference);
 		vk::SubpassDependency subpassDependency(
 			VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput,
 			vk::PipelineStageFlagBits::eColorAttachmentOutput, {},
 			vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite);
-		renderPass_ = logicalDevice_->createRenderPass(vk::RenderPassCreateInfo({}, 1, &colorAttachment, 1,
+		const vk::AttachmentDescription attachments[2] = { colorAttachment, depthAttachment };
+		renderPass_ = logicalDevice_->createRenderPass(vk::RenderPassCreateInfo({}, 2, attachments, 1,
 		                                                                        &subpass, 1, &subpassDependency));
 
 		if (!renderPass_)
@@ -596,6 +599,7 @@ private:
 			VK_FALSE, 0.0f, 0.0f, 0.0f, 1.0f);
 		vk::PipelineMultisampleStateCreateInfo pipelineMultisampleStateCreateInfo(
 			{}, vk::SampleCountFlagBits::e1, VK_FALSE);
+		vk::PipelineDepthStencilStateCreateInfo pipelineDepthStencilStateCreateInfo({}, VK_TRUE, VK_TRUE, vk::CompareOp::eLess, VK_FALSE, VK_FALSE, {}, {}, 0.0f, 1.0f);
 		vk::PipelineColorBlendAttachmentState pipelineColorBlendAttachmentState(VK_FALSE, {}, {}, {}, {}, {}, {},
 		                                                                        vk::ColorComponentFlagBits::eR | vk::
 		                                                                        ColorComponentFlagBits::eG | vk::
@@ -618,7 +622,7 @@ private:
 			                                                           &pipelineInputAssemblyStateCreateInfo, nullptr,
 			                                                           &pipelineViewportStateCreateInfo,
 			                                                           &pipelineRasterizationStateCreateInfo,
-			                                                           &pipelineMultisampleStateCreateInfo, nullptr,
+			                                                           &pipelineMultisampleStateCreateInfo, &pipelineDepthStencilStateCreateInfo,
 			                                                           &pipelineColorBlendStateCreateInfo, nullptr,
 			                                                           graphicsPipelineLayout_, renderPass_
 		                                                           });
@@ -636,8 +640,8 @@ private:
 	{
 		for (const auto imageView : swapchainImageViews_)
 		{
-			const vk::ImageView attachments[] = {imageView};
-			vk::FramebufferCreateInfo framebufferCreateInfo({}, renderPass_, 1, attachments, swapchainExtent_.width,
+			const std::array<vk::ImageView, 2> attachments = {imageView, depthImage_->GetImageView()};
+			vk::FramebufferCreateInfo framebufferCreateInfo({}, renderPass_, attachments.size(), &attachments[0], swapchainExtent_.width,
 			                                                swapchainExtent_.height, 1);
 			auto framebuffer = logicalDevice_->createFramebuffer(framebufferCreateInfo);
 			if (!framebuffer)
@@ -669,44 +673,7 @@ private:
 		                                                   }, vk::ImageTiling::eOptimal,
 		                                                   vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 		depthImage_.reset(new Image(logicalDevice_, physicalDevice_, { swapchainExtent_.width, swapchainExtent_.height }, imageFormat, vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal));
-		depthImage_->CreateImageView(vk::ImageAspectFlagBits::eDepth);
-	}
-
-	void CreateVulkanTexture()
-	{
-		rockTexture_.reset(new Texture("assets/textures/rocks_05/col.jpg", logicalDevice_, physicalDevice_,
-		                               commandPool_, graphicsQueue_));
-	}
-
-	void CreateVulkanVertexBuffer()
-	{
-		const auto bufferSize = sizeof(vertices[0]) * vertices.size();
-
-		const auto stagingBuffer = std::make_unique<Buffer>(logicalDevice_, physicalDevice_, bufferSize,
-		                                                    vk::BufferUsageFlagBits::eTransferSrc,
-		                                                    vk::SharingMode::eExclusive,
-		                                                    vk::MemoryPropertyFlagBits::eHostVisible | vk::
-		                                                    MemoryPropertyFlagBits::eHostCoherent);
-		stagingBuffer->Fill(0, bufferSize, &vertices[0]);
-		vertexBuffer_.reset(new Buffer(logicalDevice_, physicalDevice_, bufferSize,
-		                               vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
-		                               {}, vk::MemoryPropertyFlagBits::eDeviceLocal));
-		Buffer::Copy(stagingBuffer, vertexBuffer_, bufferSize, commandPool_, graphicsQueue_);
-	}
-
-	void CreateVulkanIndexBuffer()
-	{
-		const auto bufferSize = sizeof(indices[0]) * indices.size();
-		const auto stagingBuffer = std::make_unique<Buffer>(logicalDevice_, physicalDevice_, bufferSize,
-		                                                    vk::BufferUsageFlagBits::eTransferSrc,
-		                                                    vk::SharingMode::eExclusive,
-		                                                    vk::MemoryPropertyFlagBits::eHostVisible | vk::
-		                                                    MemoryPropertyFlagBits::eHostCoherent);
-		stagingBuffer->Fill(0, bufferSize, &indices[0]);
-		indexBuffer_.reset(new Buffer(logicalDevice_, physicalDevice_, bufferSize,
-		                              vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, {},
-		                              vk::MemoryPropertyFlagBits::eDeviceLocal));
-		Buffer::Copy(stagingBuffer, indexBuffer_, bufferSize, commandPool_, graphicsQueue_);
+		depthImage_->CreateImageView(imageFormat, vk::ImageAspectFlagBits::eDepth);
 	}
 
 	void CreateVulkanUniformBuffers()
@@ -750,7 +717,7 @@ private:
 		for (size_t i = 0; i < swapchainImages_.size(); ++i)
 		{
 			vk::DescriptorBufferInfo descriptorBufferInfo(uniformBuffers_[i]->GetHandle(), 0, sizeof(ModelViewProj));
-			auto descriptorImageInfo = rockTexture_->GenerateDescriptorImageInfo();
+			auto descriptorImageInfo = chaletMesh_->GetTexture()->GenerateDescriptorImageInfo();
 			logicalDevice_->updateDescriptorSets(
 				{
 					{
@@ -782,17 +749,17 @@ private:
 			vk::CommandBufferBeginInfo commandBufferBeginInfo;
 			buffer.begin(commandBufferBeginInfo);
 			//throw std::runtime_error("Could not begin recording vk::CommandBuffer. Verify your hardware is supported, and your drivers are up-to-date.");
-			const vk::ClearValue clearColor = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+			const std::array<vk::ClearValue, 2> clearValues = { vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}), vk::ClearDepthStencilValue(1.0f, 0.0f) };
 			vk::RenderPassBeginInfo renderPassBeginInfo(renderPass_, swapchainFramebuffers_[i],
-			                                            {{0, 0}, swapchainExtent_}, 1, &clearColor);
+			                                            {{0, 0}, swapchainExtent_}, clearValues.size(), &clearValues[0]);
 
 			buffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
 			buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline_);
-			buffer.bindVertexBuffers(0, vertexBuffer_->GetHandle(), static_cast<vk::DeviceSize>(0));
-			buffer.bindIndexBuffer(indexBuffer_->GetHandle(), 0, vk::IndexType::eUint16);
+			buffer.bindVertexBuffers(0, chaletMesh_->GetVertexBuffer()->GetHandle(), static_cast<vk::DeviceSize>(0));
+			buffer.bindIndexBuffer(chaletMesh_->GetIndexBuffer()->GetHandle(), 0, vk::IndexType::eUint32);
 			buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, graphicsPipelineLayout_, 0, 1,
 			                          &descriptorSets_[i], 0, nullptr);
-			buffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+			buffer.drawIndexed(static_cast<uint32_t>(chaletMesh_->GetNumIndices()), 1, 0, 0, 0);
 			buffer.endRenderPass();
 			buffer.end();
 		}
@@ -869,6 +836,7 @@ private:
 		CreateVulkanImageViews();
 		CreateVulkanRenderPass();
 		CreateVulkanGraphicsPipeline();
+		CreateVulkanDepthBuffer();
 		CreateVulkanFramebuffers();
 		CreateVulkanUniformBuffers();
 		CreateVulkanDescriptorPool();
@@ -886,7 +854,7 @@ private:
 		ModelViewProj mvp = {
 //			glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
 			glm::mat4(1.0f),
-			glm::lookAt(glm::vec3(1.0f, 0.75f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			glm::lookAt(glm::vec3(-2.0f, -2.0f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
 			glm::perspective(glm::radians(45.0f), swapchainExtent_.width / static_cast<float>(swapchainExtent_.height),
 			                 0.1f, 10.0f)
 		};
@@ -961,6 +929,7 @@ private:
 
 	void CleanupVulkanSwapchain()
 	{
+		depthImage_.reset();
 		for (const auto framebuffer : swapchainFramebuffers_)
 		{
 			logicalDevice_->destroyFramebuffer(framebuffer);
@@ -994,9 +963,8 @@ private:
 	{
 		CleanupVulkanSwapchain();
 		logicalDevice_->destroyDescriptorSetLayout(descriptorSetLayout_);
-		indexBuffer_.reset();
-		vertexBuffer_.reset();
-		rockTexture_.reset();
+		chaletMesh_.reset();
+		depthImage_.reset();
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
