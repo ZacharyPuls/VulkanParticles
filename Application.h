@@ -101,9 +101,7 @@ private:
 	vk::CommandPool commandPool_;
 	std::vector<vk::CommandBuffer> commandBuffers_;
 
-	vk::Image depthImage_;
-	vk::DeviceMemory depthMemory_;
-	vk::ImageView depthImageView_;
+	std::unique_ptr<Image> depthImage_;
 	
 	std::unique_ptr<Texture> rockTexture_;
 
@@ -670,7 +668,8 @@ private:
 			                                                   vk::Format::eD24UnormS8Uint
 		                                                   }, vk::ImageTiling::eOptimal,
 		                                                   vk::FormatFeatureFlagBits::eDepthStencilAttachment);
-		
+		depthImage_.reset(new Image(logicalDevice_, physicalDevice_, { swapchainExtent_.width, swapchainExtent_.height }, imageFormat, vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal));
+		depthImage_->CreateImageView(vk::ImageAspectFlagBits::eDepth);
 	}
 
 	void CreateVulkanTexture()
