@@ -6,6 +6,7 @@
 #include "Texture.h"
 
 #include <vector>
+#include <unordered_map>
 
 class Mesh
 {
@@ -28,11 +29,13 @@ public:
 				"].");
 		}
 
+		std::unordered_map<Vertex, uint32_t> uniqueVertices = {};
+
 		for (const auto& shape : shapes)
 		{
 			for (const auto& index : shape.mesh.indices)
 			{
-				vertices_.push_back({
+				Vertex vertex = {
 					{
 						attrib.vertices[3 * index.vertex_index + 0], attrib.vertices[3 * index.vertex_index + 1],
 						attrib.vertices[3 * index.vertex_index + 2]
@@ -44,8 +47,13 @@ public:
 						attrib.texcoords[2 * index.texcoord_index + 0],
 						1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
 					}
-				});
-				indices_.push_back(indices_.size());
+				};
+				if (uniqueVertices.count(vertex) == 0)
+				{
+					uniqueVertices[vertex] = static_cast<uint32_t>(vertices_.size());
+					vertices_.push_back(vertex);
+				}
+				indices_.push_back(uniqueVertices[vertex]);
 			}
 		}
 
@@ -94,12 +102,12 @@ public:
 	{
 		return indices_.size();
 	}
-	
+
 	const std::unique_ptr<Texture>& GetTexture() const
 	{
 		return texture_;
 	}
-	
+
 private:
 	std::shared_ptr<vk::Device> parentLogicalDevice_;
 	std::shared_ptr<vk::PhysicalDevice> parentPhysicalDevice_;
