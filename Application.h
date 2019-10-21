@@ -672,7 +672,10 @@ private:
 			                                                   vk::Format::eD24UnormS8Uint
 		                                                   }, vk::ImageTiling::eOptimal,
 		                                                   vk::FormatFeatureFlagBits::eDepthStencilAttachment);
-		depthImage_.reset(new Image(logicalDevice_, physicalDevice_, { swapchainExtent_.width, swapchainExtent_.height }, imageFormat, vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal));
+		depthImage_.reset(new Image(logicalDevice_, physicalDevice_,
+		                            {swapchainExtent_.width, swapchainExtent_.height, 1}, imageFormat,
+		                            vk::ImageUsageFlagBits::eDepthStencilAttachment,
+		                            vk::MemoryPropertyFlagBits::eDeviceLocal));
 		depthImage_->CreateImageView(imageFormat, vk::ImageAspectFlagBits::eDepth);
 	}
 

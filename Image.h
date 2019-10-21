@@ -6,7 +6,7 @@ class Image
 {
 public:
 	Image(std::shared_ptr<vk::Device> logicalDevice, std::shared_ptr<vk::PhysicalDevice> physicalDevice,
-	      const std::array<uint32_t, 2> dimensions, const vk::Format& format,
+	      const std::array<uint32_t, 3> dimensions, const vk::Format& format,
 	      const vk::ImageUsageFlags& imageUsageFlags,
 	      const vk::MemoryPropertyFlags& memoryPropertyFlags) : parentLogicalDevice_(logicalDevice),
 	                                                            parentPhysicalDevice_(physicalDevice), format_(format)
@@ -14,8 +14,9 @@ public:
 		int width, height, numChannels;
 		width_ = static_cast<uint32_t>(dimensions[0]);
 		height_ = static_cast<uint32_t>(dimensions[1]);
+		mipLevels_ = static_cast<uint32_t>(dimensions[2]);
 		imageHandle_ = parentLogicalDevice_->createImage({
-			{}, vk::ImageType::e2D, format_, {width_, height_, 1}, 1, 1,
+			{}, vk::ImageType::e2D, format_, {width_, height_, 1}, mipLevels_, 1,
 			vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, imageUsageFlags
 		});
 		const auto memoryRequirements = parentLogicalDevice_->getImageMemoryRequirements(imageHandle_);
@@ -40,7 +41,7 @@ public:
 	{
 		imageView_ = parentLogicalDevice_->createImageView({ {}, imageHandle_, vk::ImageViewType::e2D,
 			format, {}, {
-				aspectFlags, 0, 1, 0, 1
+				aspectFlags, 0, mipLevels_, 0, 1
 			} });
 	}
 
@@ -52,7 +53,7 @@ public:
 		const auto commandBuffer = Util::BeginOneTimeSubmitCommand(commandPool, parentLogicalDevice_.get());
 		vk::ImageMemoryBarrier imageMemoryBarrier(sourceAccessMask, destinationAccessMask, oldLayout, newLayout, {}, {},
 			imageHandle_,
-			{ aspectFlags, 0, 1, 0, 1 });
+			{ aspectFlags, 0, mipLevels_, 0, 1 });
 		commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, {}, imageMemoryBarrier);
 		Util::EndOneTimeSubmitCommand(commandBuffer, commandPool, parentLogicalDevice_.get(),
 			graphicsQueue);
@@ -72,5 +73,6 @@ protected:
 
 	uint32_t width_;
 	uint32_t height_;
+	uint32_t mipLevels_;
 	vk::Format format_;
 };

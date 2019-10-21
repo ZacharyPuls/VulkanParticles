@@ -37,7 +37,8 @@ public:
 			{
 				Vertex vertex = {
 					{
-						attrib.vertices[3 * index.vertex_index + 0], attrib.vertices[3 * index.vertex_index + 1],
+						attrib.vertices[3 * index.vertex_index + 0],
+						attrib.vertices[3 * index.vertex_index + 1],
 						attrib.vertices[3 * index.vertex_index + 2]
 					},
 					{
@@ -57,33 +58,18 @@ public:
 			}
 		}
 
-		auto bufferSize = sizeof(vertices_[0]) * vertices_.size();
-
-		auto stagingBuffer = std::make_unique<Buffer>(parentLogicalDevice_, parentPhysicalDevice_, bufferSize,
-		                                              vk::BufferUsageFlagBits::eTransferSrc,
-		                                              vk::SharingMode::eExclusive,
-		                                              vk::MemoryPropertyFlagBits::eHostVisible | vk::
-		                                              MemoryPropertyFlagBits::eHostCoherent);
-		stagingBuffer->Fill(0, bufferSize, &vertices_[0]);
-		vertexBuffer_.reset(new Buffer(parentLogicalDevice_, parentPhysicalDevice_, bufferSize,
-		                               vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
-		                               {}, vk::MemoryPropertyFlagBits::eDeviceLocal));
-		Buffer::Copy(stagingBuffer, vertexBuffer_, bufferSize, commandPool, graphicsQueue);
-
-		bufferSize = sizeof(indices_[0]) * indices_.size();
-		stagingBuffer.reset(new Buffer(parentLogicalDevice_, parentPhysicalDevice_, bufferSize,
-		                               vk::BufferUsageFlagBits::eTransferSrc,
-		                               vk::SharingMode::eExclusive,
-		                               vk::MemoryPropertyFlagBits::eHostVisible | vk::
-		                               MemoryPropertyFlagBits::eHostCoherent));
-		stagingBuffer->Fill(0, bufferSize, &indices_[0]);
-		indexBuffer_.reset(new Buffer(parentLogicalDevice_, parentPhysicalDevice_, bufferSize,
-		                              vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, {},
-		                              vk::MemoryPropertyFlagBits::eDeviceLocal));
-		Buffer::Copy(stagingBuffer, indexBuffer_, bufferSize, commandPool, graphicsQueue);
+		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&vertices_[0]), sizeof(vertices_[0]) * vertices_.size(), vertexBuffer_, vk::BufferUsageFlagBits::eVertexBuffer);
+		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&indices_[0]), sizeof(indices_[0]) * indices_.size(), indexBuffer_, vk::BufferUsageFlagBits::eIndexBuffer);
 
 		texture_.reset(new Texture(textureFilename, parentLogicalDevice_, parentPhysicalDevice_,
-		                           commandPool, graphicsQueue));
+		                           commandPool, graphicsQueue, false));
+	}
+
+	Mesh(std::shared_ptr<vk::Device> logicalDevice, std::shared_ptr<vk::PhysicalDevice> physicalDevice,
+		const vk::CommandPool& commandPool, const vk::Queue graphicsQueue,
+		const std::vector<Vertex>& vertices, const std::vector<uint32_t> indices, const std::string& textureFilename) : parentLogicalDevice_(logicalDevice), parentPhysicalDevice_(physicalDevice), vertices_(vertices), indices_(indices)
+	{
+		
 	}
 
 	~Mesh() = default;
@@ -116,4 +102,18 @@ private:
 	std::unique_ptr<Buffer> vertexBuffer_;
 	std::unique_ptr<Buffer> indexBuffer_;
 	std::unique_ptr<Texture> texture_;
+
+	void fillBuffer_(const vk::CommandPool& commandPool, const vk::Queue graphicsQueue, const void** data, const vk::DeviceSize dataSize, std::unique_ptr<Buffer>& targetBuffer, vk::BufferUsageFlagBits usage)
+	{
+		auto stagingBuffer = std::make_unique<Buffer>(parentLogicalDevice_, parentPhysicalDevice_, dataSize,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::SharingMode::eExclusive,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::
+			MemoryPropertyFlagBits::eHostCoherent);
+		stagingBuffer->Fill(0, dataSize, &data[0]);
+		targetBuffer.reset(new Buffer(parentLogicalDevice_, parentPhysicalDevice_, dataSize,
+			vk::BufferUsageFlagBits::eTransferDst | usage,
+			{}, vk::MemoryPropertyFlagBits::eDeviceLocal));
+		Buffer::Copy(stagingBuffer, targetBuffer, dataSize, commandPool, graphicsQueue);
+	}
 };
