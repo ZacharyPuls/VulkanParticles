@@ -58,18 +58,25 @@ public:
 			}
 		}
 
-		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&vertices_[0]), sizeof(vertices_[0]) * vertices_.size(), vertexBuffer_, vk::BufferUsageFlagBits::eVertexBuffer);
-		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&indices_[0]), sizeof(indices_[0]) * indices_.size(), indexBuffer_, vk::BufferUsageFlagBits::eIndexBuffer);
+		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&vertices_[0]),
+		            sizeof(vertices_[0]) * vertices_.size(), vertexBuffer_, vk::BufferUsageFlagBits::eVertexBuffer);
+		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&indices_[0]),
+		            sizeof(indices_[0]) * indices_.size(), indexBuffer_, vk::BufferUsageFlagBits::eIndexBuffer);
 
 		texture_.reset(new Texture(textureFilename, parentLogicalDevice_, parentPhysicalDevice_,
 		                           commandPool, graphicsQueue, false));
 	}
 
 	Mesh(std::shared_ptr<vk::Device> logicalDevice, std::shared_ptr<vk::PhysicalDevice> physicalDevice,
-		const vk::CommandPool& commandPool, const vk::Queue graphicsQueue,
-		const std::vector<Vertex>& vertices, const std::vector<uint32_t> indices, const std::string& textureFilename) : parentLogicalDevice_(logicalDevice), parentPhysicalDevice_(physicalDevice), vertices_(vertices), indices_(indices)
+	     const vk::CommandPool& commandPool, const vk::Queue graphicsQueue,
+	     const std::vector<Vertex>& vertices, const std::vector<uint32_t> indices, const std::string& textureFilename) :
+		parentLogicalDevice_(logicalDevice), parentPhysicalDevice_(physicalDevice), vertices_(vertices),
+		indices_(indices)
 	{
-		
+		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&vertices_[0]),
+		            sizeof(vertices_[0]) * vertices_.size(), vertexBuffer_, vk::BufferUsageFlagBits::eVertexBuffer);
+		fillBuffer_(commandPool, graphicsQueue, reinterpret_cast<const void**>(&indices_[0]),
+			sizeof(indices_[0])* indices_.size(), indexBuffer_, vk::BufferUsageFlagBits::eIndexBuffer);
 	}
 
 	~Mesh() = default;
@@ -103,17 +110,19 @@ private:
 	std::unique_ptr<Buffer> indexBuffer_;
 	std::unique_ptr<Texture> texture_;
 
-	void fillBuffer_(const vk::CommandPool& commandPool, const vk::Queue graphicsQueue, const void** data, const vk::DeviceSize dataSize, std::unique_ptr<Buffer>& targetBuffer, vk::BufferUsageFlagBits usage)
+	void fillBuffer_(const vk::CommandPool& commandPool, const vk::Queue graphicsQueue, const void** data,
+	                 const vk::DeviceSize dataSize, std::unique_ptr<Buffer>& targetBuffer,
+	                 vk::BufferUsageFlagBits usage)
 	{
 		auto stagingBuffer = std::make_unique<Buffer>(parentLogicalDevice_, parentPhysicalDevice_, dataSize,
-			vk::BufferUsageFlagBits::eTransferSrc,
-			vk::SharingMode::eExclusive,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::
-			MemoryPropertyFlagBits::eHostCoherent);
+		                                              vk::BufferUsageFlagBits::eTransferSrc,
+		                                              vk::SharingMode::eExclusive,
+		                                              vk::MemoryPropertyFlagBits::eHostVisible | vk::
+		                                              MemoryPropertyFlagBits::eHostCoherent);
 		stagingBuffer->Fill(0, dataSize, &data[0]);
 		targetBuffer.reset(new Buffer(parentLogicalDevice_, parentPhysicalDevice_, dataSize,
-			vk::BufferUsageFlagBits::eTransferDst | usage,
-			{}, vk::MemoryPropertyFlagBits::eDeviceLocal));
+		                              vk::BufferUsageFlagBits::eTransferDst | usage,
+		                              {}, vk::MemoryPropertyFlagBits::eDeviceLocal));
 		Buffer::Copy(stagingBuffer, targetBuffer, dataSize, commandPool, graphicsQueue);
 	}
 };

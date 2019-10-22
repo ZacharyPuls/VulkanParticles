@@ -1,21 +1,11 @@
 #pragma once
 
-#include "GraphicsHeaders.h"
-
-#include <iostream>
-#include <stdexcept>
-#include <string>
-#include <vector>
-#include <chrono>
-#include <iomanip>
-#include <optional>
-#include <set>
-#include <sstream>
-#include <fstream>
+#include "stdafx.h"
 #include "Vertex.h"
 #include "Buffer.h"
 #include "Texture.h"
 #include "Mesh.h"
+#include "Camera.h"
 
 const std::vector<const char*> VK_VALIDATION_LAYERS = {
 	"VK_LAYER_KHRONOS_validation"
@@ -44,6 +34,7 @@ public:
 	Application()
 	{
 		InitializeGlfw();
+		camera_ = std::make_unique<Camera>();
 		CreateGlfwWindow();
 		CreateVulkanInstance();
 		CreateVulkanSurface();
@@ -115,14 +106,18 @@ private:
 	
 	std::vector<std::unique_ptr<Buffer>> uniformBuffers_;
 
+	std::unique_ptr<Camera> camera_;
+	
 	std::vector<vk::Semaphore> imageAvailableSemaphores_;
 	std::vector<vk::Semaphore> renderFinishedSemaphores_;
 	std::vector<vk::Fence> inFlightFences_;
 	size_t currentFrame = 0;
 	bool framebufferResized = false;
 
-	const int DEFAULT_WINDOW_WIDTH = 640;
-	const int DEFAULT_WINDOW_HEIGHT = 480;
+	float deltaTime_; // time between rendering frames, used for framerate-independent camera movement
+
+	const int DEFAULT_WINDOW_WIDTH = 1366;
+	const int DEFAULT_WINDOW_HEIGHT = 1024;
 	inline static const char* APP_NAME = "Vulkan Particles!";
 	inline static const uint32_t APP_VERSION = VK_MAKE_VERSION(0, 0, 1);
 	inline static const char* ENGINE_NAME = "BZEngine";
@@ -182,6 +177,8 @@ private:
 		glfwSetWindowUserPointer(appWindow_, this);
 		glfwSetKeyCallback(appWindow_, KeyboardCallback);
 		glfwSetFramebufferSizeCallback(appWindow_, ResizeCallback);
+		glfwSetCursorPosCallback(appWindow_, MouseCallback);
+		glfwSetInputMode(appWindow_, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 		if (!appWindow_)
 		{
@@ -822,6 +819,21 @@ private:
 		app->framebufferResized = true;
 	}
 
+	static void MouseCallback(GLFWwindow* window, double xpos, double ypos)
+	{
+		auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+		
+		static double lastX = app->DEFAULT_WINDOW_WIDTH / 2.0f;
+		static double lastY = app->DEFAULT_WINDOW_HEIGHT / 2.0f;
+
+		float deltaX = xpos - lastX;
+		float deltaY = lastY - ypos;
+		lastX = xpos;
+		lastY = ypos;
+		
+		app->camera_->UpdateAngle(deltaX, deltaY);	
+	}
+
 	void RecreateVulkanSwapchain()
 	{
 		auto width = 0, height = 0;
@@ -848,16 +860,11 @@ private:
 	}
 
 	void UpdateVulkanUniformBuffer(const uint32_t index)
-	{
-		static auto startTime = std::chrono::high_resolution_clock::now();
-
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		auto deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
+	{	
 		ModelViewProj mvp = {
 //			glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-			glm::mat4(1.0f),
-			glm::lookAt(glm::vec3(-2.0f, -2.0f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+			camera_->GetViewMatrix(),
 			glm::perspective(glm::radians(45.0f), swapchainExtent_.width / static_cast<float>(swapchainExtent_.height),
 			                 0.1f, 10.0f)
 		};
@@ -924,6 +931,36 @@ private:
 	{
 		while (!glfwWindowShouldClose(appWindow_))
 		{
+			// static auto startTime = std::chrono::high_resolution_clock::now();
+
+			// auto currentTime = std::chrono::high_resolution_clock::now();
+			// deltaTime_ = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+			static auto lastTime = glfwGetTime();
+			auto currentTime = glfwGetTime();
+			deltaTime_ = currentTime - lastTime;
+			lastTime = currentTime;
+			
+			if (glfwGetKey(appWindow_, GLFW_KEY_W) == GLFW_PRESS)
+			{
+				camera_->Forward(deltaTime_);
+			}
+
+			if (glfwGetKey(appWindow_, GLFW_KEY_A) == GLFW_PRESS)
+			{
+				camera_->Left(deltaTime_);
+			}
+
+			if (glfwGetKey(appWindow_, GLFW_KEY_S) == GLFW_PRESS)
+			{
+				camera_->Backward(deltaTime_);
+			}
+
+			if (glfwGetKey(appWindow_, GLFW_KEY_D) == GLFW_PRESS)
+			{
+				camera_->Right(deltaTime_);
+			}
+			
 			glfwPollEvents();
 			RenderFrame();
 		}
