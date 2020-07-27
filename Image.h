@@ -1,62 +1,68 @@
 #pragma once
 
-#include "GraphicsHeaders.h"
+#include "stdafx.h"
+#include "VulkanDeviceContext.h"
+#include "Util.h"
 
 class Image
 {
 public:
-	Image(std::shared_ptr<vk::Device> logicalDevice, std::shared_ptr<vk::PhysicalDevice> physicalDevice,
+	Image(const VulkanDeviceContext& deviceContext, const std::shared_ptr<vk::CommandPool>& commandPool,
 	      const std::array<uint32_t, 3> dimensions, const vk::Format& format,
 	      const vk::ImageUsageFlags& imageUsageFlags,
-	      const vk::MemoryPropertyFlags& memoryPropertyFlags) : parentLogicalDevice_(logicalDevice),
-	                                                            parentPhysicalDevice_(physicalDevice), format_(format)
+	      const vk::MemoryPropertyFlags& memoryPropertyFlags) : deviceContext_(deviceContext),
+	                                                            commandPool_(commandPool), format_(format)
 	{
-		int width, height, numChannels;
 		width_ = static_cast<uint32_t>(dimensions[0]);
 		height_ = static_cast<uint32_t>(dimensions[1]);
 		mipLevels_ = static_cast<uint32_t>(dimensions[2]);
-		imageHandle_ = parentLogicalDevice_->createImage({
+		
+		imageHandle_ = deviceContext_.LogicalDevice->createImage({
 			{}, vk::ImageType::e2D, format_, {width_, height_, 1}, mipLevels_, 1,
 			vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, imageUsageFlags
 		});
-		const auto memoryRequirements = parentLogicalDevice_->getImageMemoryRequirements(imageHandle_);
-		memoryHandle_ = parentLogicalDevice_->allocateMemory({
+		const auto memoryRequirements = deviceContext_.LogicalDevice->getImageMemoryRequirements(imageHandle_);
+		memoryHandle_ = deviceContext_.LogicalDevice->allocateMemory({
 			memoryRequirements.size,
 			Util::FindSupportedMemoryType(
-				parentPhysicalDevice_.get(),
+				deviceContext_,
 				memoryRequirements.memoryTypeBits,
 				memoryPropertyFlags)
 		});
-		parentLogicalDevice_->bindImageMemory(imageHandle_, memoryHandle_, 0);
+		deviceContext_.LogicalDevice->bindImageMemory(imageHandle_, memoryHandle_, 0);
 	}
 
 	~Image()
 	{
-		parentLogicalDevice_->destroyImageView(imageView_);
-		parentLogicalDevice_->destroyImage(imageHandle_);
-		parentLogicalDevice_->freeMemory(memoryHandle_);
+		DebugMessage("Cleaning up VulkanParticles::Image.");
+		if (deviceContext_.LogicalDevice != nullptr) {
+			deviceContext_.LogicalDevice->destroyImageView(imageView_);
+			deviceContext_.LogicalDevice->destroyImage(imageHandle_);
+			deviceContext_.LogicalDevice->freeMemory(memoryHandle_);
+		}
 	}
 
-	void CreateImageView(vk::Format format, vk::ImageAspectFlags aspectFlags) 
+	void CreateImageView(vk::Format format, vk::ImageAspectFlags aspectFlags)
 	{
-		imageView_ = parentLogicalDevice_->createImageView({ {}, imageHandle_, vk::ImageViewType::e2D,
+		imageView_ = deviceContext_.LogicalDevice->createImageView({
+			{}, imageHandle_, vk::ImageViewType::e2D,
 			format, {}, {
 				aspectFlags, 0, mipLevels_, 0, 1
-			} });
+			}
+		});
 	}
 
-	void TransitionLayout(const vk::CommandPool& commandPool, const vk::Queue& graphicsQueue, vk::Format format,
-		vk::ImageLayout oldLayout, vk::ImageLayout newLayout, vk::AccessFlags sourceAccessMask,
-		vk::AccessFlags destinationAccessMask, vk::PipelineStageFlags sourceStage,
-		vk::PipelineStageFlags destinationStage, vk::ImageAspectFlags aspectFlags)
+	void TransitionLayout(vk::Format format,
+	                      vk::ImageLayout oldLayout, vk::ImageLayout newLayout, vk::AccessFlags sourceAccessMask,
+	                      vk::AccessFlags destinationAccessMask, vk::PipelineStageFlags sourceStage,
+	                      vk::PipelineStageFlags destinationStage, vk::ImageAspectFlags aspectFlags)
 	{
-		const auto commandBuffer = Util::BeginOneTimeSubmitCommand(commandPool, parentLogicalDevice_.get());
+		const auto commandBuffer = Util::BeginOneTimeSubmitCommand(deviceContext_, commandPool_);
 		vk::ImageMemoryBarrier imageMemoryBarrier(sourceAccessMask, destinationAccessMask, oldLayout, newLayout, {}, {},
-			imageHandle_,
-			{ aspectFlags, 0, mipLevels_, 0, 1 });
+		                                          imageHandle_,
+		                                          {aspectFlags, 0, mipLevels_, 0, 1});
 		commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, {}, imageMemoryBarrier);
-		Util::EndOneTimeSubmitCommand(commandBuffer, commandPool, parentLogicalDevice_.get(),
-			graphicsQueue);
+		Util::EndOneTimeSubmitCommand(deviceContext_, commandPool_, commandBuffer);
 	}
 
 	vk::ImageView GetImageView() const
@@ -65,8 +71,8 @@ public:
 	}
 
 protected:
-	std::shared_ptr<vk::Device> parentLogicalDevice_;
-	std::shared_ptr<vk::PhysicalDevice> parentPhysicalDevice_;
+	const VulkanDeviceContext& deviceContext_;
+	const std::shared_ptr<vk::CommandPool>& commandPool_;
 	vk::Image imageHandle_;
 	vk::DeviceMemory memoryHandle_;
 	vk::ImageView imageView_;

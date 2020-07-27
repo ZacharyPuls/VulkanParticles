@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GraphicsHeaders.h"
+#include "stdafx.h"
 
 class Camera
 {
