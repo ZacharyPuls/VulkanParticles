@@ -19,12 +19,19 @@ public:
 		  size_(size),
 		  life_(1.0f)
 	{
+		DebugMessage(
+			"Particle::Particle(position={x=" + std::to_string(position_.x) + ",y=" + std::to_string(position_.y) +
+			",z=" + std::to_string(position_.z) + "},velocity={x=" + std::to_string(velocity_.x) + ",y=" +
+			std::to_string(velocity_.y) + ",z=" + std::to_string(velocity_.z) + "})");
 	}
 
 	void Update(const float deltaTime)
 	{
 		position_ += velocity_ * (DAMPENING * deltaTime);
 		life_ -= (DAMPENING * deltaTime);
+		/*DebugMessage(
+			"Particle::Update(deltaTime=" + std::to_string(deltaTime) + ",position={x=" + std::to_string(position_.x) + ",y=" + std::to_string(position_.y) +
+			",z=" + std::to_string(position_.z) + "},life=" + std::to_string(life_) + ")");*/
 	}
 
 	glm::vec3 GetPosition() const

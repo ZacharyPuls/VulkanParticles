@@ -3,17 +3,19 @@
 #include "stdafx.h"
 #include <set>
 #include <optional>
+
+
+#include "DescriptorSet.h"
 #include "Image.h"
 #include "VulkanDeviceContext.h"
 #include "Mesh.h"
 #include "VulkanParticlesException.h"
-#include "GenericBuffer.h"
 
 class VulkanContext
 {
 public:
 
-	VulkanContext(const std::vector<const char*>& enabledLayers, const std::vector<const char*>& extensions,
+	VulkanContext(std::vector<const char*> enabledLayers, std::vector<const char*> extensions,
 		const std::string& appName, const uint32_t appVersion, const std::string& engineName,
 		const uint32_t engineVersion) : enabledLayers_(enabledLayers)
 	{
@@ -22,34 +24,41 @@ public:
 		auto enabledExtensions = &extensions[0];
 
 		const auto applicationInfo = vk::ApplicationInfo(appName.c_str(), appVersion, engineName.c_str(), engineVersion,
-			VK_API_VERSION_1_1);
-		instance_ = std::make_shared<vk::Instance>(createInstance(vk::InstanceCreateInfo({}, &applicationInfo, enabledLayerCount, &enabledLayers_[0],
-			enabledExtensionsCount, enabledExtensions)));
+			VK_API_VERSION_1_2);
+
+		auto enables = vk::ValidationFeatureEnableEXT{ VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT };
+		auto features = vk::ValidationFeaturesEXT{ 1, &enables };
+
+		const char* const* enabledLayersPtr = (enabledLayerCount > 0) ? &enabledLayers_[0] : nullptr;
+		
+		auto instanceCreateInfo = vk::InstanceCreateInfo({}, &applicationInfo, enabledLayerCount, enabledLayersPtr,
+		                                   enabledExtensionsCount, enabledExtensions);
+
+		instanceCreateInfo.pNext = &features;
+		instance_ = vk::createInstanceUnique(instanceCreateInfo);
 	}
 	
 	~VulkanContext()
 	{
+		// TODO: [zpuls 2020-07-31T18:14] Add better error handling to VulkanContext::~VulkanContext()
 		DebugMessage("Cleaning up VulkanParticles::VulkanContext.");
-		DestroySwapchain();
-
-		depthImage_.reset();
-		
-		deviceContext_.LogicalDevice->destroyDescriptorSetLayout(*descriptorSetLayout_);
-
-		for (size_t i = 0; i < maxFramesInFlight_; i++)
-		{
-			deviceContext_.LogicalDevice->destroySemaphore(renderFinishedSemaphores_[i]);
-			deviceContext_.LogicalDevice->destroySemaphore(imageAvailableSemaphores_[i]);
-			deviceContext_.LogicalDevice->destroyFence(inFlightFences_[i]);
-		}
-
-		deviceContext_.LogicalDevice->destroyCommandPool(*commandPool_);
-		deviceContext_.LogicalDevice->destroy();
-
-		instance_->destroySurfaceKHR(*surface_);
-		instance_->destroy();
 	}
-	
+
+	vk::Extent2D GetSwapchainExtent()
+	{
+		return swapchainExtent_;
+	}
+
+	VulkanDeviceContext GetDeviceContext()
+	{
+		return deviceContext_;
+	}
+
+	vk::UniqueCommandPool& GetCommandPool()
+	{
+		return commandPool_;
+	}
+
 	class SwapchainOutOfDateException : public VulkanParticlesException
 	{
 	public:
@@ -69,110 +78,31 @@ public:
 			
 		}
 	};
-	
-	std::shared_ptr<vk::Instance> GetInstance() const
-	{
-		return instance_;
-	}
 
-	std::vector<const char*> GetEnabledLayers() const
+	// might want to hard-code descriptorsetlayouts in here for now, to enforce separation of concerns.
+	void Initialize(GLFWwindow* appWindow, const vk::Extent2D swapchainExtent, const vk::Format imageFormat, const std::stringstream& vertexShaderSource, const std::stringstream& fragmentShaderSource, const float minDepth, const float maxDepth, const int maxFramesInFlight)
 	{
-		return enabledLayers_;
-	}
+		CreateSurface(appWindow);
+		SelectPhysicalDevice();
+		CreateLogicalDevice();
+		CreateSwapchain(swapchainExtent);
+		CreateImageViews(imageFormat);
+		CreateRenderPass(imageFormat);
+		CreateDescriptorPool();
+		CreateCommandPool();
 
-	std::shared_ptr<vk::SurfaceKHR> GetSurface() const
-	{
-		return surface_;
-	}
-
-	VulkanDeviceContext GetDeviceContext() const
-	{
-		return deviceContext_;
-	}
-
-	std::shared_ptr<vk::Queue> GetGraphicsQueue() const
-	{
-		return deviceContext_.GraphicsQueue;
-	}
-
-	std::shared_ptr<vk::Queue> GetPresentQueue() const
-	{
-		return deviceContext_.PresentQueue;
-	}
-
-	std::shared_ptr<vk::SwapchainKHR> GetSwapchain() const
-	{
-		return swapchain_;
-	}
-
-	vk::Format GetSwapchainImageFormat() const
-	{
-		return swapchainImageFormat_;
-	}
-
-	vk::Extent2D GetSwapchainExtent() const
-	{
-		return swapchainExtent_;
-	}
-
-	std::vector<vk::Image> GetSwapchainImages() const
-	{
-		return swapchainImages_;
-	}
-
-	std::vector<vk::ImageView> GetSwapchainImageViews() const
-	{
-		return swapchainImageViews_;
-	}
-
-	std::shared_ptr<Image> GetDepthImage() const
-	{
-		return depthImage_;
-	}
-
-	std::shared_ptr<vk::RenderPass> GetRenderPass() const
-	{
-		return renderPass_;
-	}
-
-	std::shared_ptr<vk::DescriptorSetLayout> GetDescriptorSetLayout() const
-	{
-		return descriptorSetLayout_;
-	}
-
-	std::shared_ptr<vk::DescriptorPool> GetDescriptorPool() const
-	{
-		return descriptorPool_;
-	}
-
-	std::vector<vk::DescriptorSet> GetDescriptorSets() const
-	{
-		return descriptorSets_;
-	}
-
-	std::shared_ptr<vk::PipelineLayout> GetGraphicsPipelineLayout() const
-	{
-		return graphicsPipelineLayout_;
-	}
-
-	std::shared_ptr<vk::Pipeline> GetGraphicsPipeline() const
-	{
-		return graphicsPipeline_;
-	}
-
-	std::vector<vk::Framebuffer> GetSwapchainFramebuffers() const
-	{
-		return swapchainFramebuffers_;
-	}
-
-	std::shared_ptr<vk::CommandPool> GetCommandPool() const
-	{
-		return commandPool_;
-	}
-
-	std::vector<vk::CommandBuffer> GetCommandBuffers() const
-	{
-		return commandBuffers_;
+		// TODO: [zpuls 2020-08-08T15:55] Figure out wtf to do about dynamic descriptorset/layout binding....NVIDIA only supports 8 bound at a time? Not sure I understand the concept fully.
+		vk::DescriptorSetLayoutBinding uboLayoutBinding = { 0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex };
+		vk::DescriptorSetLayoutBinding samplerLayoutBinding = { 1, vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment };
+		
+		const auto descriptorSetLayoutIndex = AddDescriptorSetLayout({ uboLayoutBinding, samplerLayoutBinding });
+		
+		CreateGraphicsPipeline(vertexShaderSource, fragmentShaderSource, Vertex::GetVertexInputBindingDescription(), Vertex::GetVertexInputAttributeDescriptions(), minDepth, maxDepth);
+		CreateDepthBuffer();
+		CreateFramebuffers();
+		// create descriptor sets here?
+		CreateCommandBuffers();
+		CreateSyncObjects(maxFramesInFlight);
 	}
 	
 	void CreateSurface(GLFWwindow* appWindow)
@@ -182,7 +112,8 @@ public:
 		{
 			throw std::runtime_error("Could not create vk::SurfaceKHR from appWindow.");
 		}
-		surface_ = std::make_shared<vk::SurfaceKHR>(surfaceHandle);
+		vk::ObjectDestroy<vk::Instance, VULKAN_HPP_DEFAULT_DISPATCHER_TYPE> _deleter(instance_.get());
+		surface_ = vk::UniqueSurfaceKHR(vk::SurfaceKHR(surfaceHandle), _deleter);
 	}
 
 	void SelectPhysicalDevice()
@@ -221,7 +152,7 @@ public:
 		auto queuePriority = 1.0f;
 		for (auto queueFamily : uniqueQueueFamilies)
 		{
-			queueCreateInfos.push_back(vk::DeviceQueueCreateInfo({}, queueFamily, 1, &queuePriority));
+			queueCreateInfos.emplace_back(vk::DeviceQueueCreateInfo({}, queueFamily, 1, &queuePriority));
 		}
 
 		auto enabledLayerCount = enabledLayers_.size();
@@ -281,24 +212,14 @@ public:
 				indices.GraphicsFamily.value(), indices.PresentFamily.value()
 				})
 			: std::vector<uint32_t>();
-		
-		swapchain_ = std::make_shared<vk::SwapchainKHR>(deviceContext_.LogicalDevice->createSwapchainKHR(vk::SwapchainCreateInfoKHR({}, *surface_,
-			imageCount,
-			surfaceFormat.format,
-			surfaceFormat.colorSpace,
-			extent, 1,
-			vk::ImageUsageFlagBits::
-			eColorAttachment,
-			imageSharingMode,
+
+		swapchain_ = deviceContext_.LogicalDevice->createSwapchainKHRUnique(vk::SwapchainCreateInfoKHR(
+			{}, *surface_, imageCount, surfaceFormat.format, surfaceFormat.colorSpace,
+			extent, 1, vk::ImageUsageFlagBits::eColorAttachment, imageSharingMode,
 			queueFamilyIndexCount,
-			!queueFamilyIndices.empty()
-			? &queueFamilyIndices[0]
-			: nullptr,
-			swapChainSupport
-			.Capabilities.currentTransform,
-			vk::CompositeAlphaFlagBitsKHR::
-			eOpaque,
-			presentMode, VK_TRUE)));
+			!queueFamilyIndices.empty() ? &queueFamilyIndices[0] : nullptr,
+			swapChainSupport.Capabilities.currentTransform,
+			vk::CompositeAlphaFlagBitsKHR::eOpaque, presentMode, VK_TRUE));
 
 		if (!swapchain_)
 		{
@@ -307,17 +228,26 @@ public:
 		}
 
 		swapchainImages_ = deviceContext_.LogicalDevice->getSwapchainImagesKHR(*swapchain_);
-		swapchainImageFormat_ = surfaceFormat.format;
 		swapchainExtent_ = extent;
+
+		CreateImageViews(surfaceFormat.format);
+		CreateRenderPass(surfaceFormat.format);
 	}
 
-	void CreateImageViews()
+	void RecreateSwapchain(const vk::Extent2D swapchainExtent)
+	{
+		WaitIdle();
+		DestroySwapchain();
+		CreateSwapchain(swapchainExtent);
+	}
+
+	void CreateImageViews(const vk::Format imageFormat)
 	{
 		for (const auto image : swapchainImages_)
 		{
-			auto imageView = deviceContext_.LogicalDevice->createImageView(vk::ImageViewCreateInfo(
+			auto imageView = deviceContext_.LogicalDevice->createImageViewUnique(vk::ImageViewCreateInfo(
 				{}, image,
-				vk::ImageViewType::e2D, swapchainImageFormat_,
+				vk::ImageViewType::e2D, imageFormat,
 				{},
 				vk::ImageSubresourceRange(
 					vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)));
@@ -325,13 +255,13 @@ public:
 			{
 				throw std::runtime_error("Could not create vk::ImageView for given swapChainImage.");
 			}
-			swapchainImageViews_.push_back(imageView);
+			swapchainImageViews_.emplace_back(std::move(imageView));
 		}
 	}
 
-	void CreateRenderPass()
+	void CreateRenderPass(const vk::Format imageFormat)
 	{
-		vk::AttachmentDescription colorAttachment({}, swapchainImageFormat_,
+		vk::AttachmentDescription colorAttachment({}, imageFormat,
 			vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
 			vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare,
 			vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
@@ -357,8 +287,9 @@ public:
 			vk::PipelineStageFlagBits::eColorAttachmentOutput, {},
 			vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite);
 		const vk::AttachmentDescription attachments[2] = { colorAttachment, depthAttachment };
-		renderPass_ = std::make_shared<vk::RenderPass>(deviceContext_.LogicalDevice->createRenderPass(vk::RenderPassCreateInfo({}, 2, attachments, 1,
-			&subpass, 1, &subpassDependency)));
+		renderPass_ = deviceContext_.LogicalDevice->createRenderPassUnique(
+			vk::RenderPassCreateInfo({}, 2, attachments, 1, &subpass, 1,
+			                         &subpassDependency));
 
 		if (!renderPass_)
 		{
@@ -366,21 +297,6 @@ public:
 				"Could not create vk::RenderPass. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
 	}
-
-	void CreateDescriptorSetLayout()
-	{
-		vk::DescriptorSetLayoutBinding uniformBufferBinding(0, vk::DescriptorType::eUniformBuffer, 1,
-			vk::ShaderStageFlagBits::eVertex);
-		vk::DescriptorSetLayoutBinding uniformSamplerBinding(1, vk::DescriptorType::eCombinedImageSampler, 1,
-			vk::ShaderStageFlagBits::eFragment);
-		const std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings = {
-			uniformSamplerBinding, uniformBufferBinding
-		};
-		vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo(
-			{}, static_cast<uint32_t>(descriptorSetLayoutBindings.size()), &descriptorSetLayoutBindings[0]);
-		descriptorSetLayout_ = std::make_shared<vk::DescriptorSetLayout>(deviceContext_.LogicalDevice->createDescriptorSetLayout(descriptorSetLayoutCreateInfo));
-	}
-
 
 	void CreateGraphicsPipeline(const std::stringstream& vertexShaderSource,
 	                                  const std::stringstream& fragmentShaderSource,
@@ -392,10 +308,10 @@ public:
 		auto fragmentShaderModule = createShaderModule_(fragmentShaderSource);
 
 		vk::PipelineShaderStageCreateInfo vertexShaderPipelineShaderStageCreateInfo(
-			{}, vk::ShaderStageFlagBits::eVertex, vertexShaderModule, "main");
+			{}, vk::ShaderStageFlagBits::eVertex, vertexShaderModule.get(), "main");
 
 		vk::PipelineShaderStageCreateInfo fragmentShaderPipelineShaderStageCreateInfo(
-			{}, vk::ShaderStageFlagBits::eFragment, fragmentShaderModule, "main");
+			{}, vk::ShaderStageFlagBits::eFragment, fragmentShaderModule.get(), "main");
 
 		vk::PipelineShaderStageCreateInfo pipelineShaderStageCreateInfos[] = {
 			vertexShaderPipelineShaderStageCreateInfo, fragmentShaderPipelineShaderStageCreateInfo
@@ -423,55 +339,61 @@ public:
 		vk::PipelineColorBlendStateCreateInfo pipelineColorBlendStateCreateInfo(
 			{}, VK_FALSE, vk::LogicOp::eCopy, 1, &pipelineColorBlendAttachmentState);
 
-		vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, 1, descriptorSetLayout_.get());
-		graphicsPipelineLayout_ = std::make_shared<vk::PipelineLayout>(deviceContext_.LogicalDevice->createPipelineLayout(pipelineLayoutCreateInfo));
+		const auto rawDescriptorSetLayouts = vk::uniqueToRaw(descriptorSetLayouts_);
+		vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, rawDescriptorSetLayouts.size(), &rawDescriptorSetLayouts[0]);
+		graphicsPipelineLayout_ = deviceContext_.LogicalDevice->createPipelineLayoutUnique(pipelineLayoutCreateInfo);
 		if (!graphicsPipelineLayout_)
 		{
 			throw std::runtime_error(
 				"Could not create vk::PipelineLayout for the Vulkan graphics pipeline. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
 
-		graphicsPipeline_ = std::make_shared<vk::Pipeline>(deviceContext_.LogicalDevice->createGraphicsPipeline(nullptr, {
-																	   {}, 2, pipelineShaderStageCreateInfos,
-																	   &pipelineVertexInputStateCreateInfo,
-																	   &pipelineInputAssemblyStateCreateInfo, nullptr,
-																	   &pipelineViewportStateCreateInfo,
-																	   &pipelineRasterizationStateCreateInfo,
-																	   &pipelineMultisampleStateCreateInfo, &pipelineDepthStencilStateCreateInfo,
-																	   &pipelineColorBlendStateCreateInfo, nullptr,
-																	   *graphicsPipelineLayout_, *renderPass_
-			}));
+		graphicsPipeline_ = deviceContext_.LogicalDevice->createGraphicsPipelineUnique(nullptr, {
+			                                                                               {}, 2,
+			                                                                               pipelineShaderStageCreateInfos,
+			                                                                               &pipelineVertexInputStateCreateInfo,
+			                                                                               &pipelineInputAssemblyStateCreateInfo,
+			                                                                               nullptr,
+			                                                                               &pipelineViewportStateCreateInfo,
+			                                                                               &pipelineRasterizationStateCreateInfo,
+			                                                                               &pipelineMultisampleStateCreateInfo,
+			                                                                               &pipelineDepthStencilStateCreateInfo,
+			                                                                               &pipelineColorBlendStateCreateInfo,
+			                                                                               nullptr,
+			                                                                               *graphicsPipelineLayout_,
+			                                                                               *renderPass_
+		                                                                               });
 		if (!graphicsPipeline_)
 		{
 			throw std::runtime_error(
 				"Could not create vk::Pipeline for the Vulkan graphics pipeline. Verify your hardware is supported, and your drivers are up-to-date.");
 		}
-
-		deviceContext_.LogicalDevice->destroyShaderModule(vertexShaderModule);
-		deviceContext_.LogicalDevice->destroyShaderModule(fragmentShaderModule);
 	}
 
 	void CreateFramebuffers()
 	{
-		for (const auto imageView : swapchainImageViews_)
+		for (vk::UniqueImageView& imageView : swapchainImageViews_)
 		{
-			const std::array<vk::ImageView, 2> attachments = { imageView, depthImage_->GetImageView() };
-			vk::FramebufferCreateInfo framebufferCreateInfo({}, *renderPass_, attachments.size(), &attachments[0], swapchainExtent_.width,
-				swapchainExtent_.height, 1);
-			auto framebuffer = deviceContext_.LogicalDevice->createFramebuffer(framebufferCreateInfo);
+			std::array<vk::ImageView, 2> attachments = { imageView.get(), depthImage_->GetImageView().get() };
+			auto framebuffer = deviceContext_.LogicalDevice->createFramebufferUnique({
+				{}, *renderPass_, attachments.size(), &attachments[0],
+				swapchainExtent_.width, swapchainExtent_.height, 1
+			});
 			if (!framebuffer)
 			{
 				throw std::runtime_error("Could not create vk::Framebuffer for given imageView.");
 			}
-			swapchainFramebuffers_.push_back(framebuffer);
+			swapchainFramebuffers_.emplace_back(std::move(framebuffer));
 		}
 	}
 
 	void CreateCommandPool()
 	{
 		auto queueFamilyIndices = findQueueFamilies_(*deviceContext_.PhysicalDevice);
-		const vk::CommandPoolCreateInfo commandPoolCreateInfo({}, queueFamilyIndices.GraphicsFamily.value());
-		commandPool_ = std::make_shared<vk::CommandPool>(deviceContext_.LogicalDevice->createCommandPool(commandPoolCreateInfo));
+		commandPool_ = deviceContext_.LogicalDevice->createCommandPoolUnique({
+			vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+			queueFamilyIndices.GraphicsFamily.value()
+		});
 		if (!commandPool_)
 		{
 			throw std::runtime_error(
@@ -500,9 +422,12 @@ public:
 
 		for (size_t i = 0; i < swapchainImages_.size(); ++i)
 		{
-			uniformBuffers_[i].reset(new GenericBuffer(deviceContext_, bufferSize, vk::BufferUsageFlagBits::eUniformBuffer, {},
-				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::
-				eHostCoherent));
+			uniformBuffers_[i].reset(new GenericBuffer(deviceContext_, commandPool_, bufferSize,
+			                                           vk::BufferUsageFlagBits::eUniformBuffer,
+			                                           vk::SharingMode::eExclusive,
+			                                           vk::MemoryPropertyFlagBits::eHostVisible |
+			                                           vk::MemoryPropertyFlagBits::eHostCoherent,
+			                                           "VulkanContext::uniformBuffers_[" + std::to_string(i) + "]"));
 		}
 	}
 
@@ -518,83 +443,54 @@ public:
 				static_cast<uint32_t>(swapchainImages_.size())
 			}
 		};
-		descriptorPool_ = std::make_shared<vk::DescriptorPool>(deviceContext_.LogicalDevice->createDescriptorPool({
-			{},
-			static_cast<uint32_t>(swapchainImages_
-				.size()),
-			static_cast<uint32_t>(
-				descriptorPoolSizes.size()),
-			&descriptorPoolSizes[0]
-		}));
-	}
-
-	/*
-	 * TODO: Break out DescriptorSet creation, allow texture uploading from VulkanRenderingEngine, and instead of having the user pass in a single vk::DescriptorImageInfo,
-	 * iterate through all of the active textures, and build a DescriptorBuffer for each ::Image.
-	 */
-	void CreateDescriptorSets(const size_t bufferSize, const vk::DescriptorImageInfo descriptorImageInfo)
-	{
-		std::vector<vk::DescriptorSetLayout>
-			descriptorSetLayoutTemplates(swapchainImages_.size(), *descriptorSetLayout_);
-		descriptorSets_ = deviceContext_.LogicalDevice->allocateDescriptorSets({
-			*descriptorPool_, static_cast<uint32_t>(swapchainImages_.size()),
-			&descriptorSetLayoutTemplates[0]
+		descriptorPool_ = deviceContext_.LogicalDevice->createDescriptorPoolUnique({
+			{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet},
+			static_cast<uint32_t>(swapchainImages_.size()),
+			static_cast<uint32_t>(descriptorPoolSizes.size()), &descriptorPoolSizes[0]
 		});
-		for (size_t i = 0; i < swapchainImages_.size(); ++i)
-		{
-			vk::DescriptorBufferInfo descriptorBufferInfo(uniformBuffers_[i]->GetHandle(), 0, bufferSize);
-			deviceContext_.LogicalDevice->updateDescriptorSets(
-				{
-					{
-						descriptorSets_[i], 0, 0, 1, vk::DescriptorType::eUniformBuffer, {},
-						&descriptorBufferInfo
-					},
-					{
-						descriptorSets_[i], 1, 0, 1, vk::DescriptorType::eCombinedImageSampler,
-						&descriptorImageInfo
-					}
-				}, nullptr);
-		}
 	}
 
 	/*
 	 * TODO: Break out CommandBuffer creation, allow mesh uploading from VulkanRenderingEngine, and instead of having the user pass in a single ::Mesh,
 	 * iterate through all of the active meshes, and render out each mesh for each vk::CommandBuffer's render pass.
 	 */
-	void CreateCommandBuffers(const std::shared_ptr<Mesh>& mesh)
+	void CreateCommandBuffers()
 	{
 		const vk::CommandBufferAllocateInfo commandBufferAllocateInfo(*commandPool_, vk::CommandBufferLevel::ePrimary,
-			static_cast<uint32_t>(swapchainFramebuffers_.
-				size()));
-		commandBuffers_ = deviceContext_.LogicalDevice->allocateCommandBuffers(commandBufferAllocateInfo);
+		                                                              static_cast<uint32_t>(swapchainFramebuffers_.
+			                                                              size()));
+		commandBuffers_ = deviceContext_.LogicalDevice->allocateCommandBuffersUnique(commandBufferAllocateInfo);
 		if (commandBuffers_.empty())
 		{
 			throw std::runtime_error(
 				"Could not allocate vk::CommandBuffer(s). Verify your hardware is supported, and your drivers are up-to-date.");
 		}
-
-		for (auto i = 0; i < commandBuffers_.size(); i++)
-		{
-			const auto& buffer = commandBuffers_[i];
-			vk::CommandBufferBeginInfo commandBufferBeginInfo;
-			buffer.begin(commandBufferBeginInfo);
-			//throw std::runtime_error("Could not begin recording vk::CommandBuffer. Verify your hardware is supported, and your drivers are up-to-date.");
-			const std::array<vk::ClearValue, 2> clearValues = { vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}), vk::ClearDepthStencilValue(1.0f, 0.0f) };
-			vk::RenderPassBeginInfo renderPassBeginInfo(*renderPass_, swapchainFramebuffers_[i],
-				{ {0, 0}, swapchainExtent_ }, clearValues.size(), &clearValues[0]);
-
-			buffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-			buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *graphicsPipeline_);
-			mesh->BindMeshData(buffer);
-			/*particleEffect_->BindMeshData(buffer);*/
-			buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *graphicsPipelineLayout_, 0, 1,
-				&descriptorSets_[i], 0, nullptr);
-			mesh->Draw(buffer);
-			buffer.endRenderPass();
-			buffer.end();
-		}
 	}
 
+	void BeginRenderPass(const uint32_t frameIndex)
+	{
+		auto& buffer = commandBuffers_[frameIndex];
+		vk::CommandBufferBeginInfo commandBufferBeginInfo;
+		buffer->reset({});
+		buffer->begin(&commandBufferBeginInfo);
+		const std::array<vk::ClearValue, 2> clearValues = {
+			vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}), vk::ClearDepthStencilValue(1.0f, 0.0f)
+		};
+		vk::RenderPassBeginInfo renderPassBeginInfo(*renderPass_, swapchainFramebuffers_[frameIndex].get(),
+		                                            {{0, 0}, swapchainExtent_}, clearValues.size(), &clearValues[0]);
+
+		buffer->beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+		buffer->bindPipeline(vk::PipelineBindPoint::eGraphics, *graphicsPipeline_);
+		
+	}
+
+	void EndRenderPass(const uint32_t frameIndex)
+	{
+		auto& buffer = commandBuffers_[frameIndex];
+		buffer->endRenderPass();
+		buffer->end();
+	}
+	
 	void CreateSyncObjects(const size_t maxFramesInFlight)
 	{
 		maxFramesInFlight_ = maxFramesInFlight;
@@ -603,29 +499,29 @@ public:
 
 		for (size_t i = 0; i < maxFramesInFlight; i++)
 		{
-			auto imageAvailableSemaphore = deviceContext_.LogicalDevice->createSemaphore(semaphoreCreateInfo);
+			vk::UniqueSemaphore imageAvailableSemaphore = deviceContext_.LogicalDevice->createSemaphoreUnique(semaphoreCreateInfo);
 			if (!imageAvailableSemaphore)
 			{
 				throw std::runtime_error(
 					"Could not create vk::Semaphore(s) for frame [" + std::to_string(i) +
 					"] - imageAvailableSemaphore.");
 			}
-			imageAvailableSemaphores_.push_back(imageAvailableSemaphore);
-			auto renderFinishedSemaphore = deviceContext_.LogicalDevice->createSemaphore(semaphoreCreateInfo);
+			imageAvailableSemaphores_.emplace_back(std::move(imageAvailableSemaphore));
+			vk::UniqueSemaphore renderFinishedSemaphore = deviceContext_.LogicalDevice->createSemaphoreUnique(semaphoreCreateInfo);
 			if (!renderFinishedSemaphore)
 			{
 				throw std::runtime_error(
 					"Could not create vk::Semaphore(s) for frame [" + std::to_string(i) +
 					"] - renderFinishedSemaphore.");
 			}
-			renderFinishedSemaphores_.push_back(renderFinishedSemaphore);
-			auto inFlightFence = deviceContext_.LogicalDevice->createFence(fenceCreateInfo);
+			renderFinishedSemaphores_.emplace_back(std::move(renderFinishedSemaphore));
+			vk::UniqueFence inFlightFence = deviceContext_.LogicalDevice->createFenceUnique(fenceCreateInfo);
 			if (!inFlightFence)
 			{
 				throw std::runtime_error(
 					"Could not create vk::Fence(s) for frame [" + std::to_string(i) + "] - inFlightFence.");
 			}
-			inFlightFences_.push_back(inFlightFence);
+			inFlightFences_.emplace_back(std::move(inFlightFence));
 		}
 	}
 
@@ -636,7 +532,7 @@ public:
 
 	void WaitForFences()
 	{
-		const auto result = deviceContext_.LogicalDevice->waitForFences(inFlightFences_, VK_TRUE, UINT64_MAX);
+		const auto result = deviceContext_.LogicalDevice->waitForFences(*inFlightFences_[0], VK_TRUE, UINT64_MAX);
 		
 		if (result != vk::Result::eSuccess)
 		{
@@ -649,41 +545,78 @@ public:
 		uniformBuffers_[index]->Fill(offset, size, data);
 	}
 
+	uint32_t AddDescriptorSetLayout(const std::vector<vk::DescriptorSetLayoutBinding>& bindings)
+	{
+		auto descriptorSetLayout = deviceContext_.LogicalDevice->createDescriptorSetLayoutUnique({
+			{}, static_cast<uint32_t>(bindings.size()), &bindings[0]
+		});
+		descriptorSetLayouts_.emplace_back(std::move(descriptorSetLayout));
+
+		return descriptorSetLayouts_.size() - 1;
+	}
+
+	vk::UniqueDescriptorSetLayout& GetDescriptorSetLayout(const uint32_t index)
+	{
+		return descriptorSetLayouts_[index];
+	}
+
+	uint32_t AddDescriptorSet(const uint32_t descriptorSetLayoutIndex)
+	{
+		auto& layout = GetDescriptorSetLayout(descriptorSetLayoutIndex);
+		descriptorSets_.emplace_back(std::make_shared<DescriptorSet>(deviceContext_, descriptorPool_, maxFramesInFlight_, layout.get()));
+		return descriptorSets_.size() - 1;
+	}
+
+	std::shared_ptr<DescriptorSet> GetDescriptorSet(const uint32_t index)
+	{
+		return descriptorSets_[index];
+	}
+
+	/*
+	 * descriptorWrites example:
+	 * {
+	 *	{ nullptr, 0, 0, 1, vk::DescriptorType::eUniformBuffer, {}, &descriptorBufferInfo },
+	 *	{ nullptr, 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &descriptorImageInfo }
+	 * }
+	 */
+	void UpdateDescriptorSet(const uint32_t index, std::vector<vk::WriteDescriptorSet>& descriptorWrites)
+	{
+		DebugMessage("Scene::UpdateDescriptorSet(" + std::to_string(index) + ")");
+		descriptorSets_[index]->Update(descriptorWrites);
+	}
+
 	vk::Result AcquireNextImage(const size_t currentFrame, uint32_t& imageIndex)
 	{
-		return deviceContext_.LogicalDevice->acquireNextImageKHR(*swapchain_, UINT64_MAX,
-		                                                         imageAvailableSemaphores_[currentFrame], nullptr,
+		return deviceContext_.LogicalDevice->acquireNextImageKHR(swapchain_.get(), UINT64_MAX,
+		                                                         imageAvailableSemaphores_[currentFrame].get(), nullptr,
 		                                                         &imageIndex);
+	}
+
+	void WaitForRenderFinished(const size_t frameIndex, const uint32_t imageIndex)
+	{
+		deviceContext_.LogicalDevice->waitForFences(1, &inFlightFences_[frameIndex].get(), true, UINT64_MAX);
+		deviceContext_.LogicalDevice->resetFences(inFlightFences_[frameIndex].get());
 	}
 
 	void SubmitFrame(const size_t frameIndex, const uint32_t imageIndex)
 	{
-		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores_[frameIndex] };
+		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores_[frameIndex].get() };
 		vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
-		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphores_[frameIndex] };
-		const vk::SubmitInfo submitInfo(1, waitSemaphores, waitStages, 1, &commandBuffers_[imageIndex], 1,
-			signalSemaphores);
-
-		deviceContext_.LogicalDevice->resetFences(inFlightFences_[frameIndex]);
-		deviceContext_.GraphicsQueue->submit(submitInfo, inFlightFences_[frameIndex]);
-
-		presentSwapchain_(signalSemaphores, imageIndex);
+		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphores_[frameIndex].get() };
+		vk::CommandBuffer commandBuffers[] = { commandBuffers_[imageIndex].get() };
+		const vk::SubmitInfo submitInfo(1, waitSemaphores, waitStages, 1, commandBuffers, 1, signalSemaphores);
+		deviceContext_.GraphicsQueue->submit(submitInfo, inFlightFences_[frameIndex].get());
+		presentSwapchain_(submitInfo.pSignalSemaphores[0], imageIndex);
 	}
 
 	void DestroySwapchain()
 	{
-		for (const auto framebuffer : swapchainFramebuffers_)
-		{
-			deviceContext_.LogicalDevice->destroyFramebuffer(framebuffer);
-		}
 		swapchainFramebuffers_.clear();
-
-		deviceContext_.LogicalDevice->freeCommandBuffers(*commandPool_, commandBuffers_);
 		commandBuffers_.clear();
 
-		deviceContext_.LogicalDevice->destroyPipeline(*graphicsPipeline_);
-		deviceContext_.LogicalDevice->destroyPipelineLayout(*graphicsPipelineLayout_);
-		deviceContext_.LogicalDevice->destroyRenderPass(*renderPass_);
+		graphicsPipeline_.reset();
+		graphicsPipelineLayout_.reset();
+		renderPass_.reset();
 
 		uniformBuffers_.clear();
 		
@@ -692,40 +625,70 @@ public:
 		// 	uniformBuffers_[i].reset();
 		// }
 
-		deviceContext_.LogicalDevice->destroyDescriptorPool(*descriptorPool_);
+		// TODO: [zpuls 2020-07-31T18:16] Add better error handling to VulkanContext::DestroySwapchain(). \
+											Namely, not attempting to delete/destroy objects that don't exist.
 
-		for (const auto imageView : swapchainImageViews_)
-		{
-			deviceContext_.LogicalDevice->destroyImageView(imageView);
-		}
+		descriptorPool_.reset();
+
 		swapchainImageViews_.clear();
 
-		deviceContext_.LogicalDevice->destroySwapchainKHR(*swapchain_);
+		swapchain_.reset();
+	}
+
+	void UpdateMesh(const uint32_t frameIndex, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture> texture)
+	{
+		auto descriptorBufferInfo = mesh->GetUniformBuffer(frameIndex)->GenerateDescriptorBufferInfo();
+		auto descriptorImageInfo = texture->GenerateDescriptorImageInfo();
+		std::vector<vk::WriteDescriptorSet> descriptorWrites = {
+			{nullptr, 0, 0, 1, vk::DescriptorType::eUniformBuffer, {}, &descriptorBufferInfo},
+			{nullptr, 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &descriptorImageInfo}
+		};
+		descriptorSets_[mesh->GetDescriptorSetIndex()]->Update(descriptorWrites);
+	}
+
+	void UpdateParticleEffect(const uint32_t frameIndex, std::shared_ptr<ParticleEffect> particleEffect, std::shared_ptr<Texture> texture)
+	{
+		auto descriptorBufferInfo = particleEffect->GetUniformBuffer(frameIndex)->GenerateDescriptorBufferInfo();
+		auto descriptorImageInfo = texture->GenerateDescriptorImageInfo();
+		std::vector<vk::WriteDescriptorSet> descriptorWrites = {
+			{ nullptr, 0, 0, 1, vk::DescriptorType::eUniformBuffer, {}, &descriptorBufferInfo },
+			{ nullptr, 1, 0, 1, vk::DescriptorType::eCombinedImageSampler, &descriptorImageInfo }
+		};
+		descriptorSets_[particleEffect->GetDescriptorSetIndex()]->Update(descriptorWrites);
+	}
+
+	vk::UniqueCommandBuffer& GetCommandBuffer(const uint32_t index)
+	{
+		return commandBuffers_[index];
+	}
+
+	vk::UniquePipelineLayout& GetGraphicsPipelineLayout()
+	{
+		return graphicsPipelineLayout_;
 	}
 private:
-	std::shared_ptr<vk::Instance> instance_;
-	const std::vector<const char*>& enabledLayers_;
-	std::shared_ptr<vk::SurfaceKHR> surface_;
+	vk::UniqueInstance instance_;
+	std::vector<const char*> enabledLayers_;
+	vk::UniqueSurfaceKHR surface_;
 	VulkanDeviceContext deviceContext_;
-	std::shared_ptr<vk::SwapchainKHR> swapchain_;
-	vk::Format swapchainImageFormat_;
+	vk::UniqueSwapchainKHR swapchain_;
 	vk::Extent2D swapchainExtent_;
 	std::vector<vk::Image> swapchainImages_;
-	std::vector<vk::ImageView> swapchainImageViews_;
+	std::vector<vk::UniqueImageView> swapchainImageViews_;
 	std::shared_ptr<Image> depthImage_;
-	std::shared_ptr<vk::RenderPass> renderPass_;
-	std::shared_ptr<vk::DescriptorSetLayout> descriptorSetLayout_;
-	std::shared_ptr<vk::DescriptorPool> descriptorPool_;
-	std::vector<vk::DescriptorSet> descriptorSets_;
-	std::shared_ptr<vk::PipelineLayout> graphicsPipelineLayout_;
-	std::shared_ptr<vk::Pipeline> graphicsPipeline_;
-	std::vector<vk::Framebuffer> swapchainFramebuffers_;
-	std::shared_ptr<vk::CommandPool> commandPool_;
-	std::vector<vk::CommandBuffer> commandBuffers_;
-	std::vector<std::unique_ptr<GenericBuffer>> uniformBuffers_;
-	std::vector<vk::Semaphore> imageAvailableSemaphores_;
-	std::vector<vk::Semaphore> renderFinishedSemaphores_;
-	std::vector<vk::Fence> inFlightFences_;
+	vk::UniqueRenderPass renderPass_;
+	vk::UniqueDescriptorPool descriptorPool_;
+	std::vector<vk::UniqueDescriptorSetLayout> descriptorSetLayouts_;
+	std::vector<std::shared_ptr<DescriptorSet>> descriptorSets_;
+	vk::UniquePipelineLayout graphicsPipelineLayout_;
+	vk::UniquePipeline graphicsPipeline_;
+	std::vector<vk::UniqueFramebuffer> swapchainFramebuffers_;
+	vk::UniqueCommandPool commandPool_;
+	std::vector<vk::UniqueCommandBuffer> commandBuffers_;
+	std::vector<std::shared_ptr<GenericBuffer>> uniformBuffers_;
+	std::vector<vk::UniqueSemaphore> imageAvailableSemaphores_;
+	std::vector<vk::UniqueSemaphore> renderFinishedSemaphores_;
+	std::vector<vk::UniqueFence> inFlightFences_;
 	size_t maxFramesInFlight_ = 0;
 
 	// TODO: [zpuls 2020-07-27T01:40 CDT] Break out mesh/texture/buffer allocation/deallocation into its own class, possibly set up a new memory/resource management schema? Not sure yet.
@@ -771,9 +734,9 @@ private:
 	SwapChainSupportDetails querySwapChainSupport_(const vk::PhysicalDevice& physicalDevice) const
 	{
 		return {
-			physicalDevice.getSurfaceCapabilitiesKHR(*surface_),
-			physicalDevice.getSurfaceFormatsKHR(*surface_),
-			physicalDevice.getSurfacePresentModesKHR(*surface_),
+			physicalDevice.getSurfaceCapabilitiesKHR(surface_.get()),
+			physicalDevice.getSurfaceFormatsKHR(surface_.get()),
+			physicalDevice.getSurfacePresentModesKHR(surface_.get()),
 		};
 	}
 
@@ -782,7 +745,7 @@ private:
 		QueueFamilyIndices indices;
 
 		auto queueFamilies = physicalDevice.getQueueFamilyProperties();
-
+		  
 		uint32_t i = 0;
 		for (const auto& queueFamily : queueFamilies)
 		{
@@ -791,7 +754,7 @@ private:
 				indices.GraphicsFamily = i;
 			}
 
-			if (queueFamily.queueCount > 0 && physicalDevice.getSurfaceSupportKHR(i, *surface_))
+			if (queueFamily.queueCount > 0 && physicalDevice.getSurfaceSupportKHR(i, surface_.get()))
 			{
 				indices.PresentFamily = i;
 			}
@@ -869,17 +832,17 @@ private:
 		return actualExtent;
 	}
 
-	vk::ShaderModule createShaderModule_(const std::stringstream& code) const
+	vk::UniqueShaderModule createShaderModule_(const std::stringstream& code) const
 	{
 		const auto codeString = code.str();
-		return deviceContext_.LogicalDevice->createShaderModule(vk::ShaderModuleCreateInfo(
-			{}, codeString.length(), reinterpret_cast<const uint32_t*>(&codeString[0])));
+		return deviceContext_.LogicalDevice->createShaderModuleUnique({
+			{}, codeString.length(), reinterpret_cast<const uint32_t*>(&codeString[0])
+		});
 	}
 	
-	void presentSwapchain_(const vk::Semaphore signalSemaphores[], const uint32_t imageIndex)
+	void presentSwapchain_(vk::Semaphore signalSemaphore, const uint32_t imageIndex)
 	{
-		const vk::SwapchainKHR swapchains[] = { *swapchain_ };
-		const vk::PresentInfoKHR presentInfo(1, signalSemaphores, 1, swapchains, &imageIndex);
+		const vk::PresentInfoKHR presentInfo(1, &signalSemaphore, 1, &swapchain_.get(), &imageIndex);
 		try
 		{
 			deviceContext_.PresentQueue->presentKHR(presentInfo);

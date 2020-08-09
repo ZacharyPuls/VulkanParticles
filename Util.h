@@ -50,31 +50,27 @@ namespace Util
 			});
 	}
 
-	static vk::CommandBuffer BeginOneTimeSubmitCommand(const VulkanDeviceContext& deviceContext, const std::shared_ptr<vk::CommandPool>& commandPool)
-	{
-		vk::CommandBufferAllocateInfo commandBufferAllocateInfo(*commandPool, {}, 1);
-		vk::CommandBuffer commandBuffer;
-		WRAP_VK_MEMORY_EXCEPTIONS(commandBuffer = deviceContext.LogicalDevice->allocateCommandBuffers(commandBufferAllocateInfo)[0],
-			"Util::BeginOneTimeSubmitCommand() - vk::Device::allocateCommandBuffers()")
-
-			vk::CommandBufferBeginInfo commandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-		commandBuffer.begin(commandBufferBeginInfo);
-
-		return commandBuffer;
-	}
-
-	static void EndOneTimeSubmitCommand(const VulkanDeviceContext& deviceContext, const std::shared_ptr<vk::CommandPool>& commandPool, const vk::CommandBuffer& commandBuffer)
-	{
-		commandBuffer.end();
-
-		vk::SubmitInfo submitInfo({}, {}, {}, 1, &commandBuffer);
-		auto result = deviceContext.GraphicsQueue->submit(1, &submitInfo, nullptr);
-		if (result != vk::Result::eSuccess)
-		{
-			std::cerr << "[Util::EndOneTimeSubmitCommand] Could not submit one-time command to graphics queue. Result was " << result << std::endl;
-		}
-		deviceContext.GraphicsQueue->waitIdle();
-
-		deviceContext.LogicalDevice->freeCommandBuffers(*commandPool, commandBuffer);
-	}
+	// static vk::UniqueCommandBuffer& BeginOneTimeSubmitCommand(const VulkanDeviceContext& deviceContext, vk::UniqueCommandPool& commandPool)
+	// {
+	// 	auto& commandBuffer = deviceContext.LogicalDevice->allocateCommandBuffersUnique({ commandPool.get(), {}, 1 })[0];
+	//
+	// 	commandBuffer->begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+	//
+	// 	return commandBuffer;
+	// }
+	//
+	// static void EndOneTimeSubmitCommand(const VulkanDeviceContext& deviceContext, vk::UniqueCommandPool commandPool, vk::UniqueCommandBuffer& commandBuffer)
+	// {
+	// 	commandBuffer->end();
+	//
+	// 	vk::SubmitInfo submitInfo({}, {}, {}, 1, commandBuffer.get());
+	// 	auto result = deviceContext.GraphicsQueue->submit(1, &submitInfo, nullptr);
+	// 	if (result != vk::Result::eSuccess)
+	// 	{
+	// 		std::cerr << "[Util::EndOneTimeSubmitCommand] Could not submit one-time command to graphics queue. Result was " << result << std::endl;
+	// 	}
+	// 	deviceContext.GraphicsQueue->waitIdle();
+	//
+	// 	deviceContext.LogicalDevice->freeCommandBuffers(*commandPool, commandBuffer);
+	// }
 };

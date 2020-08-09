@@ -71,7 +71,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <ExecutablePath>C:\VulkanSDK\1.1.121.2\Bin;$(ExecutablePath)</ExecutablePath>
+    <ExecutablePath>C:\VulkanSDK\1.2.148.0\Bin;$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -90,7 +90,7 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\zach\OneDrive\Programming\Libraries\shaderc\include;C:\VulkanSDK\1.1.121.2\Include;C:\Users\zach\OneDrive\Programming\Libraries\glm-0.9.9.8;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\zach\OneDrive\Programming\Libraries\shaderc\include;C:\VulkanSDK\1.2.148.0\Include;C:\Users\zach\OneDrive\Programming\Libraries\glm-0.9.9.8;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -100,7 +100,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalLibraryDirectories>C:\Users\zach\OneDrive\Programming\Libraries\shaderc\lib;C:\VulkanSDK\1.1.121.2\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\Users\zach\OneDrive\Programming\Libraries\shaderc\lib;C:\VulkanSDK\1.2.148.0\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glfw3dll.lib;vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -140,10 +140,12 @@
   <ItemGroup>
     <ClInclude Include="Application.h" />
     <ClInclude Include="assets\shaders\GraphicsHeaders.h" />
+    <ClInclude Include="Buffer.h" />
     <ClInclude Include="Camera.h" />
+    <ClInclude Include="DescriptorSet.h" />
     <ClInclude Include="GraphicsHeaders.h" />
     <ClInclude Include="Image.h" />
-    <ClInclude Include="IndexBuffer.h" />
+    <ClInclude Include="Material.h" />
     <ClInclude Include="Mesh.h" />
     <ClInclude Include="Particle.h" />
     <ClInclude Include="ParticleEffect.h" />
@@ -152,11 +154,10 @@
     <ClInclude Include="stb\stb_image.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Texture.h" />
-    <ClInclude Include="GenericBuffer.h" />
+    <ClInclude Include="Transform.h" />
     <ClInclude Include="UniformDescriptor.h" />
     <ClInclude Include="Util.h" />
     <ClInclude Include="Vertex.h" />
-    <ClInclude Include="VertexBuffer.h" />
     <ClInclude Include="VulkanContext.h" />
     <ClInclude Include="VulkanDeviceContext.h" />
     <ClInclude Include="VulkanParticlesException.h" />

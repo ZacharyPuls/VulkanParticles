@@ -10,6 +10,10 @@
 #include "VulkanContext.h"
 #include "Scene.h"
 
+#include <glm/gtx/string_cast.hpp>
+
+#include "VulkanRenderingEngine.h"
+
 const std::vector<const char*> VK_VALIDATION_LAYERS = {
 	"VK_LAYER_KHRONOS_validation"
 	// , "VK_LAYER_LUNARG_api_dump"
@@ -21,40 +25,44 @@ public:
 	Application()
 	{
 		InitializeGlfw();
-		camera_ = std::make_unique<Camera>();
 		CreateGlfwWindow();
-		CreateVulkanInstance();
-		CreateVulkanSurface();
-		SelectVulkanPhysicalDevice();
-		CreateVulkanLogicalDevice();
-		CreateVulkanSwapchain();
-		CreateVulkanImageViews();
-		CreateVulkanRenderPass();
-		CreateVulkanDescriptorSetLayout();
-		CreateVulkanGraphicsPipeline();
-		CreateVulkanCommandPool();
-		CreateVulkanDepthBuffer();
-		CreateVulkanFramebuffers();
-
-		scene_ = std::make_shared<Scene>(context_->GetDeviceContext(), context_->GetCommandPool());
-
-		chaletMesh_ = scene_->LoadObj("assets/models/chalet/chalet.obj", "assets/models/chalet/chalet.jpg");
-		/*particleEffect_ = std::make_unique<ParticleEffect>(logicalDevice_, physicalDevice_, commandPool_, graphicsQueue_, glm::vec3(0.0f, 0.0f, 0.0f), 1, 0.05f);*/
-		//CreateVulkanTexture();
-		//CreateVulkanVertexBuffer();
-		//CreateVulkanIndexBuffer();
-		CreateVulkanUniformBuffers();
-		CreateVulkanDescriptorPool();
-
+		CreateVulkanContext();
 		
-		CreateVulkanDescriptorSets();
-		CreateVulkanCommandBuffers();
-		CreateVulkanSyncObjects();
+		int width, height;
+		glfwGetFramebufferSize(appWindow_, &width, &height);
+
+		const auto& vertexShaderSource = ReadFile("assets/shaders/vert.spv");
+		const auto& fragmentShaderSource = ReadFile("assets/shaders/frag.spv");
+
+		context_->Initialize(appWindow_, {static_cast<uint32_t>(width), static_cast<uint32_t>(height)},
+		                     vk::Format::eB8G8R8A8Unorm, vertexShaderSource, fragmentShaderSource, VIEWPORT_MIN_DEPTH,
+		                     VIEWPORT_MAX_DEPTH, MAX_FRAMES_IN_FLIGHT);
+
+		scene_ = std::make_shared<Scene>(MAX_FRAMES_IN_FLIGHT);
+		scene_->SetSwapchainExtent(context_->GetSwapchainExtent());
+
+		// TODO: [zpuls 2020-08-08T18:07] Allow for dynamic descriptor set layouts based on shader/material, not just relying on the default one created during VulkanContext::Initialize().
+		const auto defaultMeshDescriptorSetLayoutIndex = 0;
+		
+		// auto chaletMeshDescriptorSet = context_->AddDescriptorSet(defaultMeshDescriptorSetLayoutIndex);
+		
+		// chaletMesh_ = scene_->LoadObj("assets/models/chalet/chalet.obj", "assets/models/chalet/chalet.jpg", context_, chaletMeshDescriptorSet);
+		
+		auto particleEffectDescriptorSet = context_->AddDescriptorSet(defaultMeshDescriptorSetLayoutIndex);
+		
+		auto particleEffectTexture = scene_->AddTexture("assets/textures/particle/texture.png", context_);
+		// TODO: [zpuls 2020-08-08T20:53] More error-handling with Transform, allow the user to add no rotation/no translation/no scale, etc, without getting -NaN values in the resulting glm::mat4 (Model Matrix)
+		auto particleEffectTransform = scene_->AddTransform(glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f), 0.0f, glm::vec3(1.0f));
+ 		particleEffect_ = scene_->AddParticleEffect(particleEffectTexture, particleEffectTransform, glm::vec3(0.0f, 0.0f, 1.0f), 5, 0.1f, context_, particleEffectDescriptorSet);
+
+		renderingEngine_ = std::make_shared<VulkanRenderingEngine>(context_, MAX_FRAMES_IN_FLIGHT);
+
+		renderingEngine_->UpdateScene(scene_);
 	}
 
 	~Application()
 	{
-		DebugMessage("Cleaning up VulkanParticles::Application.");
+		DebugMessage("Application::~Application()");
 		CleanupVulkan();
 		glfwDestroyWindow(appWindow_);
 		glfwTerminate();
@@ -68,19 +76,12 @@ public:
 private:
 	GLFWwindow* appWindow_;
 	std::shared_ptr<VulkanContext> context_;
-	
-	/*
-	std::unique_ptr<Texture> rockTexture_;
-	std::unique_ptr<Buffer> vertexBuffer_;
-	std::unique_ptr<Buffer> indexBuffer_;
-	*/
 
 	std::shared_ptr<Scene> scene_;
+	std::shared_ptr<VulkanRenderingEngine> renderingEngine_;
 	
-	std::shared_ptr<Mesh> chaletMesh_;
-	// std::unique_ptr<ParticleEffect> particleEffect_;
-
-	std::unique_ptr<Camera> camera_;
+	uint32_t chaletMesh_;
+	uint32_t particleEffect_;
 	
 	size_t currentFrame = 0;
 	bool framebufferResized = false;
@@ -98,7 +99,7 @@ private:
 	};
 	inline static const float VIEWPORT_MIN_DEPTH = 0.0f;
 	inline static const float VIEWPORT_MAX_DEPTH = 1.0f;
-	inline static const int MAX_FRAMES_IN_FLIGHT = 2;
+	inline static const int MAX_FRAMES_IN_FLIGHT = 3;
 
 	struct ModelViewProj
 	{
@@ -147,7 +148,7 @@ private:
 		return std::vector<const char*>(glfwExtensions, glfwExtensions + glfwExtensionCount);
 	}
 
-	void CreateVulkanInstance()
+	void CreateVulkanContext()
 	{
 		const uint32_t enabledLayerCount = ENABLE_VK_VALIDATION_LAYERS ? 1 : 0;
 		std::vector<const char*> enabledLayers;
@@ -188,19 +189,14 @@ private:
 		context_->CreateSwapchain(requestedSwapchainExtent);
 	}
 
-	void CreateVulkanImageViews()
+	void CreateVulkanImageViews(const vk::Format imageFormat)
 	{
-		context_->CreateImageViews();
+		context_->CreateImageViews(imageFormat);
 	}
 
-	void CreateVulkanRenderPass()
+	void CreateVulkanRenderPass(const vk::Format imageFormat)
 	{
-		context_->CreateRenderPass();
-	}
-
-	void CreateVulkanDescriptorSetLayout()
-	{
-		context_->CreateDescriptorSetLayout();
+		context_->CreateRenderPass(imageFormat);
 	}
 
 	static std::stringstream ReadFile(const std::string& filename)
@@ -219,55 +215,7 @@ private:
 
 		return buffer;
 	}
-
-	void CreateVulkanGraphicsPipeline()
-	{
-		auto vertexShaderSource = ReadFile("assets/shaders/vert.spv");
-		auto fragmentShaderSource = ReadFile("assets/shaders/frag.spv");
-
-		context_->CreateGraphicsPipeline(vertexShaderSource, fragmentShaderSource, Vertex::GetVertexInputBindingDescription(), Vertex::GetVertexInputAttributeDescriptions(), VIEWPORT_MIN_DEPTH, VIEWPORT_MAX_DEPTH);
-	}
-
-	void CreateVulkanFramebuffers()
-	{
-		context_->CreateFramebuffers();
-	}
-
-	void CreateVulkanCommandPool()
-	{
-		context_->CreateCommandPool();
-	}
-
-	void CreateVulkanDepthBuffer()
-	{
-		context_->CreateDepthBuffer();
-	}
-
-	void CreateVulkanUniformBuffers()
-	{
-		context_->CreateUniformBuffers(sizeof(ModelViewProj));
-	}
-
-	void CreateVulkanDescriptorPool()
-	{
-		context_->CreateDescriptorPool();
-	}
-
-	void CreateVulkanDescriptorSets()
-	{
-		context_->CreateDescriptorSets(sizeof(ModelViewProj), chaletMesh_->GetTexture()->GenerateDescriptorImageInfo());
-	}
-
-	void CreateVulkanCommandBuffers()
-	{
-		context_->CreateCommandBuffers(chaletMesh_);
-	}
-
-	void CreateVulkanSyncObjects()
-	{
-		context_->CreateSyncObjects(MAX_FRAMES_IN_FLIGHT);
-	}
-
+	
 	static void ThrowGlfwErrorAsException(int error, const char* description)
 	{
 		const auto exceptionMessage = "GLFW encountered an error with code [" + std::to_string(error) +
@@ -300,11 +248,17 @@ private:
 		float deltaY = lastY - ypos;
 		lastX = xpos;
 		lastY = ypos;
-		
-		app->camera_->UpdateAngle(deltaX, deltaY);	
+
+		app->scene_->GetActiveCamera()->UpdateAngle(deltaX, deltaY);
+		// app->camera_->UpdateAngle(deltaX, deltaY);	
 	}
 
-	void RecreateVulkanSwapchain()
+	void CreateVulkanDescriptorPool()
+	{
+		context_->CreateDescriptorPool();
+	}
+
+	vk::Extent2D GetWindowSize()
 	{
 		auto width = 0, height = 0;
 		while (width == 0 || height == 0)
@@ -313,73 +267,33 @@ private:
 			glfwWaitEvents();
 		}
 
-		context_->WaitIdle();
-
-		CleanupVulkanSwapchain();
-
-		CreateVulkanSwapchain();
-		CreateVulkanImageViews();
-		CreateVulkanRenderPass();
-		CreateVulkanGraphicsPipeline();
-		CreateVulkanDepthBuffer();
-		CreateVulkanFramebuffers();
-		CreateVulkanUniformBuffers();
-		CreateVulkanDescriptorPool();
-		CreateVulkanDescriptorSets();
-		CreateVulkanCommandBuffers();
+		return { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
 	}
 
-	void UpdateVulkanUniformBuffer(const uint32_t index)
+	void RecreateVulkanSwapchain()
 	{
-		const auto swapchainExtent = context_->GetSwapchainExtent();
-		ModelViewProj mvp = {
-//			glm::rotate(glm::mat4(1.0f), deltaTime * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
-			glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
-			camera_->GetViewMatrix(),
-			glm::perspective(glm::radians(45.0f), swapchainExtent.width / static_cast<float>(swapchainExtent.height),
-			                 0.1f, 10.0f)
-		};
+		context_->RecreateSwapchain(GetWindowSize());
 
-		mvp.Proj[1][1] *= -1.0f;
-
-		context_->UpdateUniformBuffer(index, 0, sizeof(mvp), &mvp);
+		// CleanupVulkanSwapchain();
+		//
+		// CreateVulkanSwapchain();
+		// CreateVulkanImageViews();
+		// CreateVulkanRenderPass();
+		// CreateVulkanGraphicsPipeline();
+		// CreateVulkanDepthBuffer();
+		// CreateVulkanFramebuffers();
+		// CreateVulkanUniformBuffers();
+		// CreateVulkanDescriptorPool();
+		// CreateVulkanDescriptorSets();
+		// CreateVulkanCommandBuffers();
 	}
 
 	void RenderFrame()
 	{
-		context_->WaitForFences();
-
-		uint32_t imageIndex;
-		const auto result = context_->AcquireNextImage(currentFrame, imageIndex);
-
-		if (result == vk::Result::eErrorOutOfDateKHR)
-		{
-			RecreateVulkanSwapchain();
-			return;
-		}
-
-		if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR)
-		{
-			throw std::runtime_error("Could not acquire Vulkan swapchain image.");
-		}
-
-		UpdateVulkanUniformBuffer(imageIndex);
-
-		try
-		{
-			context_->SubmitFrame(currentFrame, imageIndex);
-		}
-		catch (VulkanContext::SwapchainOutOfDateException&)
-		{
-			framebufferResized = false;
-			RecreateVulkanSwapchain();
-		}
-		catch (VulkanContext::PresentSwapchainUnknownException&)
-		{
-			throw std::runtime_error("Could not present Vulkan swapchain image, VulkanContext::PresentSwapchain failed. Encountered VulkanContext::PresentSwapchainUnknownException.");
-		}
-
-		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+		auto currentWindowSize = GetWindowSize();
+		auto imageIndex = renderingEngine_->BeginFrame(currentWindowSize);
+		renderingEngine_->RenderScene(scene_, imageIndex, currentWindowSize, deltaTime_);
+		renderingEngine_->EndFrame();
 	}
 
 	void MainLoop()
@@ -391,6 +305,8 @@ private:
 			// auto currentTime = std::chrono::high_resolution_clock::now();
 			// deltaTime_ = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+			// scene_->Update(currentFrame);
+			
 			static auto lastTime = glfwGetTime();
 			auto currentTime = glfwGetTime();
 			deltaTime_ = currentTime - lastTime;
@@ -398,27 +314,25 @@ private:
 			
 			if (glfwGetKey(appWindow_, GLFW_KEY_W) == GLFW_PRESS)
 			{
-				camera_->Forward(deltaTime_);
+				scene_->GetActiveCamera()->Forward(deltaTime_);
 			}
 
 			if (glfwGetKey(appWindow_, GLFW_KEY_A) == GLFW_PRESS)
 			{
-				camera_->Left(deltaTime_);
+				scene_->GetActiveCamera()->Left(deltaTime_);
 			}
 
 			if (glfwGetKey(appWindow_, GLFW_KEY_S) == GLFW_PRESS)
 			{
-				camera_->Backward(deltaTime_);
+				scene_->GetActiveCamera()->Backward(deltaTime_);
 			}
 
 			if (glfwGetKey(appWindow_, GLFW_KEY_D) == GLFW_PRESS)
 			{
-				camera_->Right(deltaTime_);
+				scene_->GetActiveCamera()->Right(deltaTime_);
 			}
 
-			// particleEffect_->Update(deltaTime_);
-			
-			glfwPollEvents();
+			// glfwPollEvents();
 			RenderFrame();
 		}
 		context_->WaitIdle();

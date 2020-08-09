@@ -13,6 +13,8 @@
 #include <sstream>
 #include <fstream>
 
+#define NDEBUG
+
 #ifdef NDEBUG
 const bool ENABLE_VK_VALIDATION_LAYERS = false;
 static void DebugMessage(const std::string& message) {

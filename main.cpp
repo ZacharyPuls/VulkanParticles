@@ -3,9 +3,8 @@
 
 int main() {
 	try {
-		Application* particlesApp = new Application();
-		particlesApp->Run();
-		delete particlesApp;
+		Application particlesApp;
+		particlesApp.Run();
 	}
 	catch (std::exception exception) {
 		std::cerr << "Exception thrown: " << exception.what() << std::endl;

@@ -2,7 +2,6 @@
 
 #include "stdafx.h"
 #include <memory>
-#include "GenericBuffer.h"
 #include "Image.h"
 #include "VulkanDeviceContext.h"
 
@@ -10,31 +9,37 @@ class Texture : public Image
 {
 public:
 	Texture(const std::string& filename, const VulkanDeviceContext& deviceContext,
-	        const std::shared_ptr<vk::CommandPool>& commandPool, const bool generateMipmaps) :
+	        vk::UniqueCommandPool& commandPool, const bool generateMipmaps) :
 		Image(deviceContext, commandPool, getImageDimensions_(filename, generateMipmaps),
 		      vk::Format::eR8G8B8A8Unorm,
 		      vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::
 		      eTransferDst | vk::ImageUsageFlagBits::eSampled,
 		      vk::MemoryPropertyFlagBits::eDeviceLocal)
 	{
+		DebugMessage("Texture::Texture()");
 		int width, height, numChannels;
 		imagePixels_.reset(stbi_load(filename.c_str(), &width, &height, &numChannels, STBI_rgb_alpha));
-		const vk::DeviceSize imageSize = height * width * 4;
-		std::unique_ptr<Buffer> stagingBuffer;
-		stagingBuffer.reset(new GenericBuffer(deviceContext_, imageSize,
-		                               vk::BufferUsageFlagBits::eTransferSrc, {},
-		                               vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::
-		                               eHostCoherent));
+		const auto imageSize = static_cast<vk::DeviceSize>(width) * static_cast<vk::DeviceSize>(height) * 4L;
+		auto stagingBuffer = std::make_shared<PixelBuffer>(deviceContext_, commandPool_, imageSize,
+		                                                   vk::BufferUsageFlagBits::eTransferSrc,
+		                                                   vk::SharingMode::eExclusive,
+		                                                   vk::MemoryPropertyFlagBits::eHostVisible |
+		                                                   vk::MemoryPropertyFlagBits::eHostCoherent, "Texture::stagingBuffer");
 		stagingBuffer->Fill(0, imageSize, &imagePixels_.get()[0]);
 
 		TransitionLayout(vk::Format::eR8G8B8A8Unorm,
 		                 vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 		                 {}, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eTopOfPipe,
 		                 vk::PipelineStageFlagBits::eTransfer, vk::ImageAspectFlagBits::eColor);
-		Buffer::Copy(stagingBuffer, imageHandle_, {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1},
-		             deviceContext_, commandPool_);
-		auto commandBuffer = Util::BeginOneTimeSubmitCommand(deviceContext_, commandPool_);
-		vk::ImageMemoryBarrier imageMemoryBarrier({}, {}, {}, {}, {}, {}, imageHandle_,
+		stagingBuffer->CopyTo(imageHandle_, vk::Extent3D{
+			                      static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1
+		                      });
+
+		auto commandBuffers = deviceContext_.LogicalDevice->allocateCommandBuffersUnique({ commandPool_.get(), {}, 1 });
+		auto& commandBuffer = commandBuffers[0];
+		commandBuffer->begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+		
+		vk::ImageMemoryBarrier imageMemoryBarrier({}, {}, {}, {}, {}, {}, imageHandle_.get(),
 		                                          {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
 
 		if (generateMipmaps)
@@ -50,7 +55,7 @@ public:
 				imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 				imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
 
-				commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+				commandBuffer->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
 				                              vk::PipelineStageFlagBits::eTransfer,
 				                              {}, {}, {}, {imageMemoryBarrier});
 
@@ -66,7 +71,7 @@ public:
 					                        )
 				                        });
 
-				commandBuffer.blitImage(imageHandle_, vk::ImageLayout::eTransferSrcOptimal, imageHandle_,
+				commandBuffer->blitImage(imageHandle_.get(), vk::ImageLayout::eTransferSrcOptimal, imageHandle_.get(),
 				                        vk::ImageLayout::eTransferDstOptimal, 1, &imageBlit, vk::Filter::eLinear);
 
 				imageMemoryBarrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
@@ -74,7 +79,7 @@ public:
 				imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
 				imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
-				commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+				commandBuffer->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
 				                              vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {},
 				                              {imageMemoryBarrier});
 
@@ -95,12 +100,16 @@ public:
 			imageMemoryBarrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 			imageMemoryBarrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
-			commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+			commandBuffer->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
 			                              vk::PipelineStageFlagBits::eFragmentShader,
 			                              {}, {}, {}, {imageMemoryBarrier});
 
-			Util::EndOneTimeSubmitCommand(deviceContext_, commandPool_, commandBuffer);
+			commandBuffer->end();
+			vk::SubmitInfo submitInfo({}, {}, {}, 1, &commandBuffer.get());
+			deviceContext_.GraphicsQueue->submit(1, &submitInfo, nullptr);
+			deviceContext_.GraphicsQueue->waitIdle();
 		}
+		
 		CreateImageView(vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
 
 		TransitionLayout(vk::Format::eR8G8B8A8Unorm,
@@ -113,36 +122,23 @@ public:
 		                                        vk::SamplerMipmapMode::eLinear, {}, {}, {}, {}, VK_TRUE, 16.0f, {}, {},
 		                                        {}, static_cast<float>(mipLevels_), vk::BorderColor::eIntOpaqueBlack,
 		                                        {});
-		samplerHandle_ = deviceContext_.LogicalDevice->createSampler(samplerCreateInfo);
+		samplerHandle_ = deviceContext_.LogicalDevice->createSamplerUnique(samplerCreateInfo);
 	}
 
 	~Texture()
 	{
-		DebugMessage("Cleaning up VulkanParticles::Texture.");
-		if (deviceContext_.LogicalDevice != nullptr) {
-			deviceContext_.LogicalDevice->destroySampler(samplerHandle_);
-		}
+		DebugMessage("Texture::~Texture()");
 	}
 
 	vk::DescriptorImageInfo GenerateDescriptorImageInfo() const
 	{
 		return {
-			samplerHandle_, imageView_, vk::ImageLayout::eShaderReadOnlyOptimal
+			samplerHandle_.get(), imageView_.get(), vk::ImageLayout::eShaderReadOnlyOptimal
 		};
 	}
 
-	const vk::Sampler& GetHandle() const
-	{
-		return samplerHandle_;
-	}
-
-	const vk::ImageView& GetImageView() const
-	{
-		return imageView_;
-	}
-
 private:
-	vk::Sampler samplerHandle_;
+	vk::UniqueSampler samplerHandle_;
 
 	struct freeImage_
 	{
